@@ -2,6 +2,18 @@ export interface ApiErrorResponse {
   error: string;
 }
 
+export type UserRole = 'viewer' | 'operator' | 'admin';
+
+export interface CurrentUser {
+  email: string;
+  role: UserRole;
+}
+
+export interface MeResponse {
+  rbac_enabled: boolean;
+  user: CurrentUser | null;
+}
+
 export interface PaginationMeta {
   page: number;
   page_size: number;

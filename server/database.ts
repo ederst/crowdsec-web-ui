@@ -133,6 +133,9 @@ export class CrowdsecDatabase {
   private readonly countUnreadNotificationsStatement: any;
   private readonly getCveCacheEntryStatement: any;
   private readonly upsertCveCacheEntryStatement: any;
+  private readonly getUserRoleStatement: any;
+  private readonly setUserRoleStatement: any;
+  private readonly listUserRolesStatement: any;
 
   constructor(options: DatabaseOptions = {}) {
     const resolvedPath = resolveDatabasePath(options);
@@ -301,6 +304,12 @@ export class CrowdsecDatabase {
       INSERT OR REPLACE INTO cve_cache (id, published_at, fetched_at)
       VALUES ($id, $published_at, $fetched_at)
     `);
+    this.getUserRoleStatement = this.db.query('SELECT role FROM user_roles WHERE email = ?');
+    this.setUserRoleStatement = this.db.query(`
+      INSERT OR REPLACE INTO user_roles (email, role, created_at, updated_at)
+      VALUES ($email, $role, COALESCE((SELECT created_at FROM user_roles WHERE email = $email), $now), $now)
+    `);
+    this.listUserRolesStatement = this.db.query('SELECT email, role FROM user_roles ORDER BY email ASC');
   }
 
   close(): void {
@@ -629,6 +638,20 @@ export class CrowdsecDatabase {
     this.upsertCveCacheEntryStatement.run({ $id: id, $published_at: publishedAt, $fetched_at: fetchedAt });
   }
 
+  getUserRole(email: string): string | null {
+    const row = this.getUserRoleStatement.get(email) as { role: string } | null;
+    return row?.role ?? null;
+  }
+
+  setUserRole(email: string, role: string): void {
+    const now = new Date().toISOString();
+    this.setUserRoleStatement.run({ $email: email, $role: role, $now: now });
+  }
+
+  listUserRoles(): Array<{ email: string; role: string }> {
+    return this.listUserRolesStatement.all() as Array<{ email: string; role: string }>;
+  }
+
   transaction<T>(callback: (value: T) => void): (value: T) => void {
     return this.db.transaction(callback);
   }
@@ -829,6 +852,15 @@ function initSchema(db: Database): void {
     );
   `;
 
+  const createUserRolesTable = `
+    CREATE TABLE IF NOT EXISTS user_roles (
+      email TEXT PRIMARY KEY,
+      role TEXT NOT NULL CHECK(role IN ('viewer', 'operator', 'admin')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `;
+
   db.exec(createAlertsTable);
   db.exec(createMetaTable);
   db.exec(createNotificationChannelsTable);
@@ -836,6 +868,7 @@ function initSchema(db: Database): void {
   db.exec(createNotificationsTable);
   db.exec(createNotificationIncidentsTable);
   db.exec(createCveCacheTable);
+  db.exec(createUserRolesTable);
 
   const tableInfo = db.query('PRAGMA table_info(decisions)').all() as Array<{ name: string; type: string }>;
   const idColumn = tableInfo.find((column) => column.name === 'id');

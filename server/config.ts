@@ -45,6 +45,8 @@ export interface RuntimeConfig {
   notificationDebugPayloads: boolean;
   timeZone: string | null;
   timeFormat: TimeFormat;
+  rbacEnabled: boolean;
+  rbacAdminEmail: string;
 }
 
 export function parseTimeZone(value: string | undefined): string | null {
@@ -279,5 +281,7 @@ export function createRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runti
     notificationDebugPayloads: parseBooleanEnv(env.NOTIFICATION_DEBUG_PAYLOADS, false),
     timeZone: parseTimeZone(env.TZ),
     timeFormat: parseTimeFormat(env.CROWDSEC_TIME_FORMAT),
+    rbacEnabled: parseBooleanEnv(env.CROWDSEC_RBAC_ENABLED, false),
+    rbacAdminEmail: (env.CROWDSEC_RBAC_ADMIN_EMAIL || '').trim().toLowerCase(),
   };
 }

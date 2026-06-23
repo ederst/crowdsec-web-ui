@@ -23,6 +23,7 @@ import type {
   DashboardWorldMapDatum,
   DecisionListItem,
   LapiStatus,
+  MeResponse,
   PaginatedResponse,
   SlimAlert,
   StatsAlert,
@@ -41,6 +42,7 @@ import { resolveMachineName } from '../shared/machine';
 import { collectDistinctOrigins, normalizeOrigin } from '../shared/origin';
 import { compileAlertSearch, compileDecisionSearch, type SearchParseError } from '../shared/search';
 import { createRuntimeConfig, getIntervalName, parseRefreshInterval, type RuntimeConfig } from './config';
+import { makeRequireRole, extractUserEmail, resolveCurrentUser } from './rbac';
 import { getDateTimeKey, getTimeZoneOffsetMs, getZonedHourlyBucketKeys } from './utils/date-time';
 import { CrowdsecDatabase, type AlertInsertParams, type DecisionInsertParams } from './database';
 import { LapiClient } from './lapi';
@@ -337,6 +339,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
   });
 
   const app = new Hono();
+  const requireRole = makeRequireRole(database, config);
   const distRoot = options.distRoot || path.resolve(process.cwd(), 'dist/client');
   const staticFiles = [
     '/logo.svg',
@@ -402,6 +405,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
   Notification Private Destinations: ${config.notificationAllowPrivateAddresses ? 'Allowed' : 'Blocked'}
   Time Zone: ${config.timeZone || 'Browser local'}
   Time Format: ${config.timeFormat}
+  RBAC: ${config.rbacEnabled ? `Enabled (admin: ${config.rbacAdminEmail || 'none'})` : 'Disabled'}
 `);
 
   if (!lapiClient.hasAuthConfig()) {
@@ -426,6 +430,21 @@ export function createApp(options: CreateAppOptions = {}): AppController {
   if (config.basePath) {
     app.get(`${config.basePath}/api/health`, healthHandler);
   }
+
+  app.get(`${config.basePath}/api/me`, (context) => {
+    if (!config.rbacEnabled) {
+      const payload: MeResponse = { rbac_enabled: false, user: null };
+      return context.json(payload);
+    }
+    const email = extractUserEmail(context.req.raw.headers);
+    if (!email) {
+      const payload: MeResponse = { rbac_enabled: true, user: null };
+      return context.json(payload, 401);
+    }
+    const user = resolveCurrentUser(email, database, config.rbacAdminEmail);
+    const payload: MeResponse = { rbac_enabled: true, user };
+    return context.json(payload);
+  });
 
   app.get(`${config.basePath}/api/alerts`, ensureAuth, async (context) => {
     try {
@@ -473,7 +492,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.post(`${config.basePath}/api/alerts/bulk-delete`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/alerts/bulk-delete`, ensureAuth, requireRole('operator'), async (context) => {
     const doRequest = async () => {
       const body = await context.req.json<BulkDeleteRequest>();
       if (!Array.isArray(body.ids) || body.ids.length === 0) {
@@ -525,7 +544,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.delete(`${config.basePath}/api/alerts/:id`, ensureAuth, async (context) => {
+  app.delete(`${config.basePath}/api/alerts/:id`, ensureAuth, requireRole('operator'), async (context) => {
     const alertId = String(context.req.param('id'));
     if (!/^\d+$/.test(alertId)) {
       return context.json({ error: 'Invalid alert ID' }, 400);
@@ -671,7 +690,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.put(`${config.basePath}/api/config/refresh-interval`, ensureAuth, async (context) => {
+  app.put(`${config.basePath}/api/config/refresh-interval`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const body = await context.req.json<{ interval?: string }>();
       const interval = body.interval;
@@ -730,7 +749,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     return context.json(notificationService.listNotifications(pageRequest.page, pageRequest.pageSize));
   });
 
-  app.post(`${config.basePath}/api/cleanup/by-ip`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/cleanup/by-ip`, ensureAuth, requireRole('operator'), async (context) => {
     const doRequest = async () => {
       const body = await context.req.json<CleanupByIpRequest>();
       const ip = String(body.ip || '').trim();
@@ -771,7 +790,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     return context.json({ updated: notificationService.markNotificationsRead(ids) });
   });
 
-  app.post(`${config.basePath}/api/notifications/bulk-delete`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/notifications/bulk-delete`, ensureAuth, requireRole('operator'), async (context) => {
     const body = await context.req.json<BulkDeleteRequest>();
     const ids = normalizeNotificationIds(body.ids);
     if (ids.length === 0) {
@@ -781,11 +800,11 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     return context.json({ deleted: notificationService.deleteNotifications(ids) });
   });
 
-  app.post(`${config.basePath}/api/notifications/delete-read`, ensureAuth, () =>
+  app.post(`${config.basePath}/api/notifications/delete-read`, ensureAuth, requireRole('operator'), () =>
     Response.json({ deleted: notificationService.deleteReadNotifications() }),
   );
 
-  app.delete(`${config.basePath}/api/notifications/:id`, ensureAuth, (context) => {
+  app.delete(`${config.basePath}/api/notifications/:id`, ensureAuth, requireRole('operator'), (context) => {
     const id = String(context.req.param('id'));
     if (!notificationService.deleteNotification(id)) {
       return context.json({ error: 'Notification not found' }, 404);
@@ -796,7 +815,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
 
   app.get(`${config.basePath}/api/notifications/settings`, ensureAuth, () => Response.json(notificationService.listSettings()));
 
-  app.post(`${config.basePath}/api/notification-channels`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/notification-channels`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const body = await context.req.json<UpsertNotificationChannelRequest>();
       return context.json(notificationService.createChannel(body), 201);
@@ -805,7 +824,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.put(`${config.basePath}/api/notification-channels/:id`, ensureAuth, async (context) => {
+  app.put(`${config.basePath}/api/notification-channels/:id`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const id = String(context.req.param('id'));
       const body = await context.req.json<UpsertNotificationChannelRequest>();
@@ -816,13 +835,13 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.delete(`${config.basePath}/api/notification-channels/:id`, ensureAuth, (context) => {
+  app.delete(`${config.basePath}/api/notification-channels/:id`, ensureAuth, requireRole('admin'), (context) => {
     const id = String(context.req.param('id'));
     notificationService.deleteChannel(id);
     return context.json({ success: true });
   });
 
-  app.post(`${config.basePath}/api/notification-channels/:id/test`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/notification-channels/:id/test`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const id = String(context.req.param('id'));
       await notificationService.testChannel(id);
@@ -833,7 +852,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.post(`${config.basePath}/api/notification-rules`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/notification-rules`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const body = await context.req.json<UpsertNotificationRuleRequest>();
       return context.json(notificationService.createRule(body), 201);
@@ -842,7 +861,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.put(`${config.basePath}/api/notification-rules/:id`, ensureAuth, async (context) => {
+  app.put(`${config.basePath}/api/notification-rules/:id`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       const id = String(context.req.param('id'));
       const body = await context.req.json<UpsertNotificationRuleRequest>();
@@ -853,13 +872,13 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.delete(`${config.basePath}/api/notification-rules/:id`, ensureAuth, (context) => {
+  app.delete(`${config.basePath}/api/notification-rules/:id`, ensureAuth, requireRole('admin'), (context) => {
     const id = String(context.req.param('id'));
     notificationService.deleteRule(id);
     return context.json({ success: true });
   });
 
-  app.post(`${config.basePath}/api/cache/clear`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/cache/clear`, ensureAuth, requireRole('admin'), async (context) => {
     try {
       console.log('Manual cache clear requested');
       database.clearSyncData();
@@ -983,7 +1002,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.post(`${config.basePath}/api/decisions`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/decisions`, ensureAuth, requireRole('operator'), async (context) => {
     const doRequest = async () => {
       const body = await context.req.json<AddDecisionRequest>();
       const ip = body.ip;
@@ -1022,7 +1041,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.post(`${config.basePath}/api/decisions/bulk-delete`, ensureAuth, async (context) => {
+  app.post(`${config.basePath}/api/decisions/bulk-delete`, ensureAuth, requireRole('operator'), async (context) => {
     const doRequest = async () => {
       const body = await context.req.json<BulkDeleteRequest>();
       if (!Array.isArray(body.ids) || body.ids.length === 0) {
@@ -1047,7 +1066,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     }
   });
 
-  app.delete(`${config.basePath}/api/decisions/:id`, ensureAuth, async (context) => {
+  app.delete(`${config.basePath}/api/decisions/:id`, ensureAuth, requireRole('operator'), async (context) => {
     const decisionId = String(context.req.param('id'));
     if (!/^\d+$/.test(decisionId)) {
       return context.json({ error: 'Invalid decision ID' }, 400);
