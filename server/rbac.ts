@@ -8,9 +8,7 @@ export function roleAtLeast(role: UserRole, min: UserRole): boolean {
 }
 
 export function extractUserEmail(headers: Headers): string | null {
-  // ponytail: X-Forwarded-Email is what oauth2-proxy sets via --pass-user-headers=true;
-  // x-auth-user is never set by oauth2-proxy and would always be null (PoC bug fix)
-  return headers.get('x-forwarded-email')?.trim().toLowerCase() || null;
+  return headers.get('x-auth-user')?.trim().toLowerCase() || null;
 }
 
 export function resolveCurrentUser(
