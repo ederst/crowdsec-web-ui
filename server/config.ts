@@ -274,7 +274,9 @@ export function createRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runti
     version: env.VITE_VERSION || '0.0.0',
     branch: env.VITE_BRANCH || 'main',
     commitHash: env.VITE_COMMIT_HASH || '',
-    updateCheckEnabled: Boolean(env.VITE_COMMIT_HASH || env.VITE_VERSION),
+    updateCheckEnabled: env.CROWDSEC_UPDATE_CHECK_ENABLED !== undefined
+      ? parseBooleanEnv(env.CROWDSEC_UPDATE_CHECK_ENABLED, true)
+      : Boolean(env.VITE_COMMIT_HASH || env.VITE_VERSION),
     dbDir: env.DB_DIR || '/app/data',
     notificationSecretKey,
     notificationAllowPrivateAddresses: parseBooleanEnv(env.NOTIFICATION_ALLOW_PRIVATE_ADDRESSES, true),
