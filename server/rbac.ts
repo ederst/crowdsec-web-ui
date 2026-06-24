@@ -16,10 +16,11 @@ export function resolveCurrentUser(
   database: CrowdsecDatabase,
   adminEmail: string,
 ): CurrentUser {
-  if (adminEmail && email === adminEmail && !database.getUserRole(email)) {
-    database.setUserRole(email, 'admin');
+  // ponytail: write on first visit so listUserRoles() can see every user
+  if (!database.getUserRole(email)) {
+    database.setUserRole(email, adminEmail && email === adminEmail ? 'admin' : 'viewer');
   }
-  const role = (database.getUserRole(email) as UserRole | null) ?? 'viewer';
+  const role = database.getUserRole(email) as UserRole;
   return { email, role };
 }
 
