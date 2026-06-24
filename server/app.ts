@@ -24,6 +24,9 @@ import type {
   DecisionListItem,
   LapiStatus,
   MeResponse,
+  UserRoleEntry,
+  PatchUserRoleRequest,
+  UserRole,
   PaginatedResponse,
   SlimAlert,
   StatsAlert,
@@ -444,6 +447,27 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     const user = resolveCurrentUser(email, database, config.rbacAdminEmail);
     const payload: MeResponse = { rbac_enabled: true, user };
     return context.json(payload);
+  });
+
+  app.get(`${config.basePath}/api/user-roles`, ensureAuth, requireRole('admin'), (context) => {
+    const rows = database.listUserRoles();
+    const payload: UserRoleEntry[] = rows.map((r) => ({ email: r.email, role: r.role as UserRole }));
+    return context.json(payload);
+  });
+
+  app.patch(`${config.basePath}/api/user-roles/:email`, ensureAuth, requireRole('admin'), async (context) => {
+    const email = decodeURIComponent(String(context.req.param('email'))).trim().toLowerCase();
+    if (!email) {
+      return context.json({ error: 'Email is required' }, 400);
+    }
+    const body = await context.req.json<PatchUserRoleRequest>();
+    const validRoles: UserRole[] = ['viewer', 'operator', 'admin'];
+    if (!validRoles.includes(body.role)) {
+      return context.json({ error: `Invalid role. Must be one of: ${validRoles.join(', ')}` }, 400);
+    }
+    database.setUserRole(email, body.role);
+    const entry: UserRoleEntry = { email, role: body.role };
+    return context.json(entry);
   });
 
   app.get(`${config.basePath}/api/alerts`, ensureAuth, async (context) => {

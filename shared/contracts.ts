@@ -14,6 +14,15 @@ export interface MeResponse {
   user: CurrentUser | null;
 }
 
+export interface UserRoleEntry {
+  email: string;
+  role: UserRole;
+}
+
+export interface PatchUserRoleRequest {
+  role: UserRole;
+}
+
 export interface PaginationMeta {
   page: number;
   page_size: number;
