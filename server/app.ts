@@ -1178,10 +1178,11 @@ export function createApp(options: CreateAppOptions = {}): AppController {
       const configScript = `<script>window.__BASE_PATH__="${safePath}";</script>`;
       html = html.replace('</head>', `${configScript}\n</head>`);
 
-      if (config.basePath) {
-        html = html.replace(/href="\.\//g, `href="${config.basePath}/`);
-        html = html.replace(/src="\.\//g, `src="${config.basePath}/`);
-      }
+      // Rewrite relative asset paths to absolute so nested routes (e.g. /settings/roles)
+      // resolve ./assets/xxx correctly regardless of URL depth.
+      // With empty basePath this becomes href="/" and src="/".
+      html = html.replace(/href="\.\//g, `href="${config.basePath}/`);
+      html = html.replace(/src="\.\//g, `src="${config.basePath}/`);
 
       context.header('Cache-Control', 'no-store, no-cache, must-revalidate');
       context.header('Pragma', 'no-cache');
