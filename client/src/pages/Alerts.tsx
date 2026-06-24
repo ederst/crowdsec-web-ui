@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { fetchAlertsPaginated, fetchAlert, deleteAlert, bulkDeleteAlerts, cleanupByIp, fetchConfig, fetchDecisionsPaginated, updateTableColumns } from "../lib/api";
 import { isSimulatedAlert, isSimulatedDecision, matchesSimulationFilter, parseSimulationFilter } from "../lib/simulation";
 import { useRefresh } from "../contexts/useRefresh";
+import { useAuth } from "../contexts/useAuth";
 import { Badge } from "../components/ui/Badge";
 import { Modal } from "../components/ui/Modal";
 import { HighlightedSearchInput } from "../components/HighlightedSearchInput";
@@ -129,6 +130,7 @@ export function Alerts() {
     const { language, t } = useI18n();
     const { formatDateTime } = useDateTime();
     const { refreshSignal, setLastUpdated } = useRefresh();
+    const { can } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const initialQueryParam = searchParams.get("q") ?? "";
     const [alerts, setAlerts] = useState<AlertListItem[]>([]);
@@ -865,6 +867,7 @@ export function Alerts() {
             </div>
 
             <div className="flex items-center gap-3">
+                {can('operator') && (
                 <button
                     onClick={() => {
                         setPendingDeleteErrorInfo(null);
@@ -875,6 +878,7 @@ export function Alerts() {
                 >
                     {t('pages.alerts.deleteSelected')}
                 </button>
+                )}
             </div>
 
             {/* Error Message */}
@@ -1156,7 +1160,7 @@ export function Alerts() {
                                             })}
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    {sourceValue && (
+                                                    {can('operator') && sourceValue && (
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
@@ -1170,6 +1174,7 @@ export function Alerts() {
                                                             <ShieldBan size={16} aria-hidden="true" />
                                                         </button>
                                                     )}
+                                                    {can('operator') && (
                                                     <button
                                                         onClick={(e) => requestDelete(alert.id, e)}
                                                         className="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors p-2 rounded-full relative z-10 cursor-pointer"
@@ -1178,6 +1183,7 @@ export function Alerts() {
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>

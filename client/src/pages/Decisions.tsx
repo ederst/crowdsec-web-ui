@@ -3,6 +3,7 @@ import { useSearchParams, Link } from "react-router-dom";
 import { deleteDecision, bulkDeleteDecisions, cleanupByIp, addDecision, fetchConfig, fetchDecisionsPaginated, updateTableColumns } from "../lib/api";
 import { isSimulatedDecision, parseSimulationFilter } from "../lib/simulation";
 import { useRefresh } from "../contexts/useRefresh";
+import { useAuth } from "../contexts/useAuth";
 import { Badge } from "../components/ui/Badge";
 import { Modal } from "../components/ui/Modal";
 import { HighlightedSearchInput } from "../components/HighlightedSearchInput";
@@ -100,6 +101,7 @@ function summarizeDeleteResult(result: BulkDeleteResult, t: I18nContextValue['t'
 export function Decisions() {
     const { language, t } = useI18n();
     const { refreshSignal, setLastUpdated } = useRefresh();
+    const { can } = useAuth();
     const [searchParams, setSearchParams] = useSearchParams();
     const initialQueryParam = searchParams.get("q") ?? "";
     const [decisions, setDecisions] = useState<DecisionListItem[]>([]);
@@ -692,6 +694,7 @@ export function Decisions() {
             </div>
             
             <div className="flex items-center gap-3">
+                {can('operator') && (
                 <button
                     onClick={openAddDecision}
                     className="bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-md transition-colors flex items-center gap-2 text-sm"
@@ -699,6 +702,8 @@ export function Decisions() {
                     <Gavel size={16} />
                     {t('pages.decisions.addDecision')}
                 </button>
+                )}
+                {can('operator') && (
                 <button
                     onClick={() => {
                         setPendingDeleteErrorInfo(null);
@@ -709,6 +714,7 @@ export function Decisions() {
                 >
                     {t('pages.decisions.deleteSelected')}
                 </button>
+                )}
             </div>
 
             {/* Error Message */}
@@ -1012,7 +1018,7 @@ export function Decisions() {
                                             })}
                                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                                 <div className="flex items-center justify-end gap-2">
-                                                    {decision.value && (
+                                                    {can('operator') && decision.value && (
                                                         <button
                                                             onClick={() => {
                                                                 setPendingDeleteErrorInfo(null);
@@ -1025,6 +1031,7 @@ export function Decisions() {
                                                             <ShieldBan size={16} aria-hidden="true" />
                                                         </button>
                                                     )}
+                                                    {can('operator') && (
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -1037,6 +1044,7 @@ export function Decisions() {
                                                     >
                                                         <Trash2 size={16} />
                                                     </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>

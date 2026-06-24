@@ -38,6 +38,7 @@ import {
   type WebhookField,
 } from '../lib/notification-config';
 import { useNotificationUnreadCount } from '../contexts/useNotificationUnreadCount';
+import { useAuth } from '../contexts/useAuth';
 import { useDateTime } from '../lib/dateTime';
 import { useRefresh } from '../contexts/useRefresh';
 import { Badge } from '../components/ui/Badge';
@@ -439,6 +440,7 @@ export function Notifications() {
   const { t } = useI18n();
   const { refreshSignal } = useRefresh();
   const { unreadCount, setUnreadCount } = useNotificationUnreadCount();
+  const { can } = useAuth();
   const [channels, setChannels] = useState<NotificationChannel[]>([]);
   const [rules, setRules] = useState<NotificationRule[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -895,6 +897,7 @@ export function Notifications() {
               <CheckCheck className="h-4 w-4" />
               {t('pages.notifications.markSelectedRead')}
             </button>
+            {can('operator') && (
             <button
               type="button"
               onClick={() => setPendingDeleteAction({ kind: 'selected', ids: selectedNotificationIds })}
@@ -904,6 +907,8 @@ export function Notifications() {
               <Trash2 className="h-4 w-4" />
               {t('pages.notifications.deleteSelected')}
             </button>
+            )}
+            {can('operator') && (
             <button
               type="button"
               onClick={() => setPendingDeleteAction({ kind: 'read' })}
@@ -913,6 +918,7 @@ export function Notifications() {
               <Trash2 className="h-4 w-4" />
               {t('pages.notifications.deleteAllRead')}
             </button>
+            )}
             <span
               className={`ml-auto inline-flex items-center gap-2 text-xs text-gray-500 transition-opacity dark:text-gray-400 ${backgroundLoading ? 'opacity-100' : 'opacity-0'}`}
               aria-live="polite"
@@ -938,7 +944,7 @@ export function Notifications() {
                     selected={selectedNotificationIds.includes(item.id)}
                     onSelect={() => toggleNotificationSelection(item.id)}
                     onMarkRead={() => void handleMarkRead(item.id)}
-                    onDelete={() => setPendingDeleteAction({ kind: 'single', id: item.id })}
+                    onDelete={can('operator') ? () => setPendingDeleteAction({ kind: 'single', id: item.id }) : undefined}
                     rowRef={index === notifications.length - 1 ? lastNotificationElementRef : undefined}
                   />
                 ))}
@@ -950,7 +956,7 @@ export function Notifications() {
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <ResourceCard title={t('pages.notifications.destinations')} actionLabel={t('pages.notifications.addDestination')} onAction={openCreateChannel}>
+        <ResourceCard title={t('pages.notifications.destinations')} actionLabel={t('pages.notifications.addDestination')} onAction={can('admin') ? openCreateChannel : undefined}>
           {channels.length === 0
             ? <p className="text-sm text-gray-500 dark:text-gray-400">{t('pages.notifications.noDestinations')}</p>
             : (
@@ -963,14 +969,14 @@ export function Notifications() {
                     hasAttachedRule={linkedChannelIds.has(channel.id)}
                     onEdit={() => openEditChannel(channel)}
                     onTest={() => void sendTestNotification(channel)}
-                    onDelete={() => void deleteNotificationChannel(channel.id).then(() => loadData({ preserveLoadedPages: true })).catch((err) => setError(err instanceof Error ? err.message : t('pages.notifications.failedToDeleteDestination')))}
+                    onDelete={can('admin') ? () => void deleteNotificationChannel(channel.id).then(() => loadData({ preserveLoadedPages: true })).catch((err) => setError(err instanceof Error ? err.message : t('pages.notifications.failedToDeleteDestination'))) : undefined}
                   />
                 ))}
               </SortableList>
             )}
         </ResourceCard>
 
-        <ResourceCard title={t('pages.notifications.rules')} actionLabel={t('pages.notifications.addRule')} onAction={openCreateRule}>
+          <ResourceCard title={t('pages.notifications.rules')} actionLabel={t('pages.notifications.addRule')} onAction={can('admin') ? openCreateRule : undefined}>
           {rules.length === 0
             ? <p className="text-sm text-gray-500 dark:text-gray-400">{t('pages.notifications.noRules')}</p>
             : (
@@ -983,7 +989,7 @@ export function Notifications() {
                     channels={channels}
                     hasDestinations={rule.channel_ids.length > 0}
                     onEdit={() => openEditRule(rule)}
-                    onDelete={() => void deleteNotificationRule(rule.id).then(() => loadData({ preserveLoadedPages: true })).catch((err) => setError(err instanceof Error ? err.message : t('pages.notifications.failedToDeleteRule')))}
+                    onDelete={can('admin') ? () => void deleteNotificationRule(rule.id).then(() => loadData({ preserveLoadedPages: true })).catch((err) => setError(err instanceof Error ? err.message : t('pages.notifications.failedToDeleteRule'))) : undefined}
                   />
                 ))}
               </SortableList>
@@ -1067,15 +1073,17 @@ function SummaryCard({ icon, label, value, sublabel }: { icon: ReactNode; label:
   );
 }
 
-function ResourceCard({ title, actionLabel, onAction, children }: { title: string; actionLabel: string; onAction: () => void; children: ReactNode }) {
+function ResourceCard({ title, actionLabel, onAction, children }: { title: string; actionLabel?: string; onAction?: () => void; children: ReactNode }) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>{title}</CardTitle>
+        {onAction && (
         <button onClick={onAction} className="inline-flex items-center gap-2 rounded-lg bg-primary-600 px-3 py-2 text-sm font-medium text-white hover:bg-primary-700">
           <Plus className="h-4 w-4" />
           {actionLabel}
         </button>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">{children}</CardContent>
     </Card>
@@ -1161,7 +1169,7 @@ function NotificationRow({
   selected: boolean;
   onSelect: () => void;
   onMarkRead: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   rowRef?: (node: HTMLDivElement | null) => void;
 }) {
   const { t } = useI18n();
@@ -1203,7 +1211,7 @@ function NotificationRow({
           </div>
           <div className="flex flex-wrap gap-2 md:self-start">
             {!item.read_at && <ActionIconButton label={t('pages.notifications.markRead')} icon={<Check className="h-4 w-4" />} onClick={onMarkRead} variant="accent" />}
-            <ActionIconButton label={t('pages.notifications.deleteNotification')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />
+            {onDelete && <ActionIconButton label={t('pages.notifications.deleteNotification')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />}
           </div>
         </div>
       </div>
@@ -1224,7 +1232,7 @@ function ChannelRow({
   hasAttachedRule: boolean;
   onEdit: () => void;
   onTest: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const { t } = useI18n();
   const { formatDateTime } = useDateTime();
@@ -1249,7 +1257,7 @@ function ChannelRow({
         <div className="flex flex-wrap gap-2 md:self-start">
           <ActionIconButton label={t('pages.notifications.sendTest')} icon={<SendHorizontal className="h-4 w-4" />} onClick={onTest} />
           <ActionIconButton label={t('pages.notifications.editDestination')} icon={<SquarePen className="h-4 w-4" />} onClick={onEdit} />
-          <ActionIconButton label={t('pages.notifications.deleteDestination')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />
+          {onDelete && <ActionIconButton label={t('pages.notifications.deleteDestination')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />}
         </div>
         </div>
       </div>
@@ -1270,7 +1278,7 @@ function RuleRow({
   channels: NotificationChannel[];
   hasDestinations: boolean;
   onEdit: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const { t } = useI18n();
 
@@ -1293,7 +1301,7 @@ function RuleRow({
         </div>
         <div className="flex flex-wrap gap-2 md:self-start">
           <ActionIconButton label={t('pages.notifications.editRule')} icon={<SquarePen className="h-4 w-4" />} onClick={onEdit} />
-          <ActionIconButton label={t('pages.notifications.deleteRule')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />
+          {onDelete && <ActionIconButton label={t('pages.notifications.deleteRule')} icon={<Trash2 className="h-4 w-4" />} onClick={onDelete} variant="danger" />}
         </div>
         </div>
       </div>
