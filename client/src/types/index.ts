@@ -1,5 +1,5 @@
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
-import type { SyncStatus } from '../../../shared/contracts';
+import type { CurrentUser, SyncStatus, UserRole } from '../../../shared/contracts';
 
 export type {
   AddDecisionRequest,
@@ -10,6 +10,7 @@ export type {
   AlertRecord,
   AlertSource,
   ConfigResponse,
+  CurrentUser,
   DashboardGranularity,
   DashboardSimulationFilter,
   DashboardStatListItem,
@@ -21,6 +22,7 @@ export type {
   BulkDeleteRequest,
   BulkDeleteResult,
   CleanupByIpRequest,
+  MeResponse,
   NotificationChannel,
   NotificationChannelType,
   DeleteResourceKind,
@@ -51,6 +53,9 @@ export type {
   UpsertNotificationRuleRequest,
   UpdateTableColumnsRequest,
   UpdateCheckResponse,
+  UserRole,
+  UserRoleEntry,
+  PatchUserRoleRequest,
 } from '../../../shared/contracts';
 
 export interface DateRangeSelection {
@@ -117,4 +122,12 @@ export interface ApiPermissionError extends Error {
 
 export interface WithChildren {
   children: ReactNode;
+}
+
+export interface AuthContextValue {
+  rbacEnabled: boolean;
+  currentUser: CurrentUser | null;
+  loading: boolean;
+  /** Returns true if RBAC is disabled OR user has at least minRole */
+  can(minRole: UserRole): boolean;
 }
