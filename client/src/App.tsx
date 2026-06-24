@@ -14,6 +14,7 @@ const Dashboard = lazy(async () => ({ default: (await import('./pages/Dashboard'
 const Alerts = lazy(async () => ({ default: (await import('./pages/Alerts')).Alerts }));
 const Decisions = lazy(async () => ({ default: (await import('./pages/Decisions')).Decisions }));
 const Notifications = lazy(async () => ({ default: (await import('./pages/Notifications')).Notifications }));
+const UserRoles = lazy(async () => ({ default: (await import('./pages/UserRoles')).UserRoles }));
 
 function RouteFallback() {
   const { t } = useI18n();
@@ -84,6 +85,14 @@ function AppContent() {
                 element={(
                   <Suspense fallback={<RouteFallback />}>
                     <Notifications />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="settings/roles"
+                element={(
+                  <Suspense fallback={<RouteFallback />}>
+                    <UserRoles />
                   </Suspense>
                 )}
               />

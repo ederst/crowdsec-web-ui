@@ -61,6 +61,8 @@ export function Layout() {
                 return t('pages.decisions.title');
             case '/notifications':
                 return t('pages.notifications.title');
+            case '/settings/roles':
+                return 'Role Management';
             default:
                 return t('pages.dashboard.title');
         }

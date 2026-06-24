@@ -20,6 +20,8 @@ import type {
   UpdateTableColumnsRequest,
   UpsertNotificationChannelRequest,
   UpsertNotificationRuleRequest,
+  UserRole,
+  UserRoleEntry,
 } from '../types';
 import { apiUrl } from './basePath';
 
@@ -327,4 +329,16 @@ export async function bulkDeleteNotifications(ids: BulkDeleteRequest['ids']): Pr
 
 export async function deleteReadNotifications(): Promise<void> {
     await sendJson('/api/notifications/delete-read', { method: 'POST' }, 'Failed to delete read notifications');
+}
+
+export async function fetchUserRoles(): Promise<UserRoleEntry[]> {
+    return fetchJson<UserRoleEntry[]>('/api/user-roles', undefined, 'Failed to fetch user roles');
+}
+
+export async function patchUserRole(email: string, role: UserRole): Promise<UserRoleEntry> {
+    return sendJson<UserRoleEntry>(`/api/user-roles/${encodeURIComponent(email)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role }),
+    }, 'Failed to update user role');
 }

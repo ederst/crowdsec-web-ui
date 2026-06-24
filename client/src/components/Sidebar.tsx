@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom";
-import { LayoutDashboard, ShieldAlert, Gavel, Bell, X, Sun, Moon, ArrowUpCircle, Menu, PanelLeftClose, Globe2 } from "lucide-react";
+import { LayoutDashboard, ShieldAlert, Gavel, Bell, X, Sun, Moon, ArrowUpCircle, Menu, PanelLeftClose, Globe2, Users } from "lucide-react";
 import { Badge } from "./ui/Badge";
 import { useNotificationUnreadCount } from "../contexts/useNotificationUnreadCount";
 import { useRefresh } from "../contexts/useRefresh";
+import { useAuth } from "../contexts/useAuth";
 import { useState, useEffect } from "react";
 import { apiUrl, assetUrl } from "../lib/basePath";
 import type { UpdateCheckResponse } from '../types';
@@ -68,6 +69,7 @@ export function Sidebar({ isOpen, onClose, onToggle, theme, toggleTheme }: Sideb
     const { unreadCount } = useNotificationUnreadCount();
     const { browserLanguage, preference, setLanguagePreference, t } = useI18n();
     const { formatTime } = useDateTime();
+    const { rbacEnabled, currentUser, can } = useAuth();
     const [updateStatus, setUpdateStatus] = useState<UpdateCheckResponse | null>(null);
 
     const links = [
@@ -201,8 +203,33 @@ export function Sidebar({ isOpen, onClose, onToggle, theme, toggleTheme }: Sideb
                         {link.to === "/notifications" ? renderUnreadBadge() : null}
                     </NavLink>
                 ))}
+                {can('admin') && (
+                <NavLink
+                    to="/settings/roles"
+                    onClick={() => { if (window.innerWidth < 1024 && onClose) onClose(); }}
+                    className={({ isActive }) =>
+                        `flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group ${isActive
+                            ? "bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400"
+                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/50 hover:text-gray-900 dark:hover:text-gray-200"
+                        }`
+                    }
+                >
+                    <div className="flex min-w-0 items-center gap-3">
+                        <Users className="w-5 h-5" />
+                        <span className="font-medium">Role Management</span>
+                    </div>
+                </NavLink>
+                )}
             </nav>
             <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-4">
+
+                {/* User identity (RBAC mode only) */}
+                {rbacEnabled && currentUser && (
+                <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 space-y-1">
+                    <p className="text-xs font-mono text-gray-700 dark:text-gray-300 truncate" title={currentUser.email}>{currentUser.email}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{currentUser.role}</p>
+                </div>
+                )}
 
                 {/* Refresh Settings */}
                 <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 space-y-2">
