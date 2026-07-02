@@ -24,12 +24,14 @@ done, fill in **Final Recap** and **Deployment Plan**.
 | `CROWDSEC_AUTH_PROXY_HEADER_USER` | `X-Auth-Request-User` | Header containing the username |
 | `CROWDSEC_AUTH_PROXY_HEADER_EMAIL` | `X-Auth-Request-Email` | Header containing the email (optional, fallback for username) |
 | `CROWDSEC_AUTH_PROXY_ROLE_SOURCE` | `groups` | `groups` = read groups header and map to role; `roles` = read role value directly |
-| `CROWDSEC_AUTH_PROXY_HEADER_GROUPS` | `X-Auth-Request-Groups` | Groups header (used when `ROLE_SOURCE=groups`) |
+| `CROWDSEC_AUTH_PROXY_HEADER_GROUPS` | `X-Auth-Request-Groups` | Groups header (used when `ROLE_SOURCE=groups`). Distinct from `CROWDSEC_AUTH_OIDC_GROUPS_CLAIM` which is a JWT claim name, not an HTTP header name. |
 | `CROWDSEC_AUTH_PROXY_GROUPS_SEPARATOR` | `,` | Separator used by the proxy for multiple groups |
-| `CROWDSEC_AUTH_PROXY_ADMIN_GROUPS` | *(empty)* | Comma-sep group names → admin role |
-| `CROWDSEC_AUTH_PROXY_READ_ONLY_GROUPS` | *(empty)* | Comma-sep group names → read-only role |
-| `CROWDSEC_AUTH_PROXY_UNMATCHED_ROLE` | `deny` | What to do if no group matches: `deny`, `admin`, `read-only` |
+| `CROWDSEC_AUTH_PROXY_ADMIN_GROUPS` | *(empty)* | Comma-sep group names → admin role (when `ROLE_SOURCE=groups`) |
+| `CROWDSEC_AUTH_PROXY_READ_ONLY_GROUPS` | *(empty)* | Comma-sep group names → read-only role (when `ROLE_SOURCE=groups`) |
+| `CROWDSEC_AUTH_PROXY_UNMATCHED_ROLE` | `deny` | Fallback when no group matches: `deny`, `admin`, `read-only` (when `ROLE_SOURCE=groups`) |
 | `CROWDSEC_AUTH_PROXY_HEADER_ROLES` | `X-Auth-Request-Roles` | Role header (used when `ROLE_SOURCE=roles`); expected values: `admin`, `read-only` |
+
+**Why not reuse `CROWDSEC_AUTH_OIDC_ADMIN_GROUPS` etc.?** `getEffectiveConfig()` reads group settings from the DB first (written by the Settings UI), then falls back to env. In proxy mode the Settings UI is hidden, so any previously DB-stored OIDC group config would silently bleed into proxy role resolution with no way to clear it. Separate vars avoid this hidden coupling. The role-resolution *logic* (`resolveOidcRole`) is still shared in code.
 
 ### Behavioural contract in proxy mode
 - **Setup phase**: skipped entirely. `/api/auth/status` always returns `setupRequired: false`.
@@ -57,10 +59,10 @@ Status: Not started
 
 - [ ] Add `AuthMode = 'local' | 'proxy'` type to `server/config.ts`
 - [ ] Add `ProxyRoleSource = 'groups' | 'roles'` type
-- [ ] Add `ProxyAuthConfig` interface with all fields listed in design reference
+- [ ] Add `ProxyAuthConfig` interface with all fields listed in design reference (includes own adminGroups/readOnlyGroups/unmatchedRole — not shared with OIDC config to avoid DB-setting bleed from `getEffectiveConfig()`)
 - [ ] Add `parseAuthMode(value: string | undefined): AuthMode` — throws on invalid value, defaults to `'local'`
 - [ ] Add `parseProxyRoleSource(value: string | undefined): ProxyRoleSource` — defaults to `'groups'`
-- [ ] Add `parseProxyAuthConfig(env): ProxyAuthConfig` function reading all `CROWDSEC_AUTH_PROXY_*` vars; reuse existing `parseCsvEnv`, `parseOidcUnmatchedRole` helpers
+- [ ] Add `parseProxyAuthConfig(env): ProxyAuthConfig` function reading all `CROWDSEC_AUTH_PROXY_*` vars; reuse existing `parseCsvEnv` and `parseOidcUnmatchedRole` helpers for the group-mapping fields
 - [ ] Add `authMode: AuthMode` and `proxyAuth: ProxyAuthConfig` to `RuntimeConfig` interface
 - [ ] Wire `parseAuthMode` + `parseProxyAuthConfig` into `createRuntimeConfig()`
 - [ ] Propagate `authMode` and `proxyAuth` fields through to `DashboardAuthConfig` OR pass as separate fields to `createDashboardAuth()` (keep `DashboardAuthConfig` for local-mode fields only; add separate `authMode` + `proxyAuth` param to factory)
@@ -83,8 +85,8 @@ Status: Not started
   - Handle IPv6 if feasible with stdlib `net`; if not, document the limitation in a `// ponytail:` comment and open a follow-up
   - Empty `trustedCidrs` list → deny all (safe default)
 - [ ] Add `resolveProxyRole(config: ProxyAuthConfig, headers: Record<string, string | undefined>): Role | null` pure function
-  - `ROLE_SOURCE=groups`: parse groups header using configured separator → call `resolveOidcRole`-equivalent with proxy group config
-  - `ROLE_SOURCE=roles`: read roles header value → map `'admin'`/`'read-only'` directly; else apply `unmatchedRole`
+  - `ROLE_SOURCE=groups`: parse groups header using configured separator → call existing `resolveOidcRole({ oidcAdminGroups: config.adminGroups, oidcReadOnlyGroups: config.readOnlyGroups, oidcUnmatchedRole: config.unmatchedRole }, groups)` — logic reused, config source separate
+  - `ROLE_SOURCE=roles`: read roles header value → map `'admin'`/`'read-only'` directly; else apply `config.unmatchedRole`
 - [ ] Add `extractProxyUsername(config: ProxyAuthConfig, headers: Record<string, string | undefined>): string | null`
   - Try `HEADER_USER`, fallback to `HEADER_EMAIL`, return `null` if both absent/empty
 - [ ] Extend `AuthMethod` type: add `'proxy'`
@@ -93,7 +95,7 @@ Status: Not started
   - Get client IP from `context.req.raw` (check `X-Forwarded-For` first, then raw socket — match existing `getPublicOrigin` pattern)
   - `isIpTrusted` check → 401 if fails
   - `extractProxyUsername` → 401 if absent
-  - `resolveProxyRole` → 401 if null (deny)
+  - `resolveProxyRole(proxyAuth, headers)` → 401 if null (deny); reads group config exclusively from `proxyAuth`, not from `getEffectiveConfig()`
   - Upsert user via `database.upsertOidcUser(username, role)` (reuse existing method)
   - `createSession(context, user, 'proxy')` — reuses existing session signing
   - `context.set('user', session)` + `await next()`
@@ -144,12 +146,12 @@ Status: Not started
 - [ ] `parseProxyRoleSource`: default `'groups'`, valid `'roles'`, invalid throws
 - [ ] `parseProxyAuthConfig`: all defaults wired correctly
 - [ ] `parseProxyAuthConfig`: TRUSTED_IPS CSV parsed correctly
-- [ ] `parseProxyAuthConfig`: UNMATCHED_ROLE forwarded to existing `parseOidcUnmatchedRole`
+- [ ] `parseProxyAuthConfig`: adminGroups/readOnlyGroups/unmatchedRole parsed from `CROWDSEC_AUTH_PROXY_*` vars (not OIDC vars)
 - [ ] `createRuntimeConfig`: `authMode` field present
 
 ### server/app-auth.ts unit tests (can live in `server/app.test.ts` or new `server/app-auth.test.ts`)
 - [ ] `isIpTrusted`: exact IPv4 match, IPv4 CIDR match, out-of-CIDR deny, empty list deny
-- [ ] `resolveProxyRole` (groups): admin group match, read-only match, no match + deny, no match + fallback role
+- [ ] `resolveProxyRole` (groups): admin group match, read-only match, no match + deny, no match + fallback role — delegates to existing `resolveOidcRole` with proxy-specific config struct
 - [ ] `resolveProxyRole` (roles): direct `admin` header, direct `read-only` header, unknown value + deny
 - [ ] `extractProxyUsername`: user header present, user absent fallback email, both absent → null
 
