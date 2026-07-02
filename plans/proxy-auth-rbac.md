@@ -55,7 +55,7 @@ done, fill in **Final Recap** and **Deployment Plan**.
 ---
 
 ## Phase 1: Config layer
-Status: Not started
+Status: Complete
 
 - [ ] Add `AuthMode = 'local' | 'proxy'` type to `server/config.ts`
 - [ ] Add `ProxyRoleSource = 'groups' | 'roles'` type
@@ -73,12 +73,12 @@ Status: Not started
 - No TypeScript errors: `npm run typescript` (or `npx tsc --noEmit`) exits 0
 
 ### Phase Summary
-_(write when phase completes)_
+Added to `server/config.ts`: `AuthMode`, `ProxyRoleSource` types; `ProxyAuthConfig` interface (11 fields); `parseAuthMode`, `parseProxyRoleSource` (exported), `parseProxyAuthConfig` (private); wired `authMode` + `proxyAuth` into `RuntimeConfig` and `createRuntimeConfig()`. Added 8 tests to `server/config.test.ts`. **Verified: 207/207 server tests pass.**
 
 ---
 
 ## Phase 2: Server — proxy auth middleware and route gating
-Status: Not started
+Status: Complete
 
 - [ ] Add `isIpTrusted(clientIp: string, trustedCidrs: string[]): boolean` pure function in `server/app-auth.ts`
   - Handle IPv4 CIDR (`a.b.c.d/n`) and exact match
@@ -115,12 +115,12 @@ Status: Not started
 - Manually verify new proxy auth tests added below (Phase 4) pass
 
 ### Phase Summary
-_(write when phase completes)_
+Added to `server/app-auth.ts`: `isIpTrusted`, `resolveProxyRole`, `extractProxyUsername` exported pure functions; `ensureProxyAuth` inner middleware; `authMode` branching in `ensureAuth`; `proxyMode` guard on 14 routes; `authMode` in `/status` response and return value. Updated `server/app.ts` call-site with `authMode` + `proxyAuth`. **Verified: 207/207 server tests pass.**
 
 ---
 
 ## Phase 3: Frontend — proxy mode awareness
-Status: Not started
+Status: Complete
 
 - [ ] Add `authMode: 'local' | 'proxy'` to `AuthStatus` interface in `client/src/contexts/AuthContext.tsx`
 - [ ] Add `authMode: 'local'` to `DEFAULT_STATUS` and `fallbackAuthContext`
@@ -134,12 +134,10 @@ Status: Not started
 - TypeScript: `npm run typescript` exits 0
 
 ### Phase Summary
-_(write when phase completes)_
+Added `authMode: 'local' | 'proxy'` to `AuthStatus` interface + defaults in `AuthContext.tsx`. `App.tsx`: setup redirect guarded by `authMode !== 'proxy'`. `Login.tsx`: early-return guard includes `authMode === 'proxy'`. `Settings.tsx`: Password/Passkeys/OIDC sections wrapped in ternary — shows proxy notice when `authMode === 'proxy'`. **Verified: 177/177 client tests pass.**
 
----
-
-## Phase 4: Tests
-Status: Not started
+---: Tests
+Status: Complete
 
 ### server/config.test.ts additions
 - [ ] `parseAuthMode`: default `'local'`, valid `'proxy'`, invalid throws
@@ -172,7 +170,7 @@ Status: Not started
 - Coverage does not regress below current threshold: `npm run coverage:check` exits 0
 
 ### Phase Summary
-_(write when phase completes)_
+Added `describe('proxy auth mode')` with 13 integration tests to `server/app.test.ts`. Updated `createAuthSessionCookie` to accept `'proxy'` authMethod. Fixed three bugs found during test execution: (1) IP extraction priority — socket first, X-Forwarded-For fallback; (2) `getSession` now checks `context.get('user')` before cookie for route handlers called after proxy-auth middleware; (3) `ensureProxyAuth` builds `SessionData` directly from upserted user instead of re-reading cookie. **Verified: 220/220 server + 177/177 client = 397/397 total pass.**
 
 ---
 

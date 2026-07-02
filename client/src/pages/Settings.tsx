@@ -67,7 +67,7 @@ function serializeGroupList(groups: string[]): string {
 
 export function Settings() {
     const { intervalMs, setIntervalMs } = useRefresh();
-    const { authEnabled, refresh: refreshAuth } = useAuth();
+    const { authEnabled, authMode, refresh: refreshAuth } = useAuth();
     const { browserLanguage, preference, setLanguagePreference, t } = useI18n();
     const toast = useOptionalToast();
     const [config, setConfig] = useState<ConfigResponse | null>(null);
@@ -479,8 +479,8 @@ export function Settings() {
                             <Save className="h-4 w-4" />
                             {isSaving ? t("common.saving") : t("common.save")}
                         </button>
-                    </div>
-                </CardContent>
+                        </div>
+                    </CardContent>
             </Card>
 
             {!authEnabled && (
@@ -497,6 +497,12 @@ export function Settings() {
                         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("pages.settings.authenticationDescription")}</p>
                     </CardHeader>
                     <CardContent className="space-y-8">
+                        {authMode === 'proxy' ? (
+                            <div className="rounded-lg border border-gray-700 bg-gray-900 p-4 text-sm text-gray-400">
+                                Authentication is managed externally by your proxy. Local login methods and OIDC configuration are not available in this mode.
+                            </div>
+                        ) : (
+                            <>
                         <div className="space-y-4">
                             <div>
                                 <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t("pages.settings.password")}</h4>
@@ -720,8 +726,10 @@ export function Settings() {
                             >
                                 <ShieldCheck className="h-4 w-4" />
                                 {isSavingOidc ? t("common.saving") : t("pages.settings.saveOidcSettings")}
-                            </button>
+                             </button>
                         </div>
+                            </>
+                        )}
                     </CardContent>
                 </Card>
             )}

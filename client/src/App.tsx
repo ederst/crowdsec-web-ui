@@ -103,13 +103,13 @@ function ProtectedAppShell() {
 }
 
 function AuthenticatedRoutes() {
-  const { authEnabled, authenticated, loading, setupRequired } = useAuth();
+  const { authEnabled, authenticated, loading, setupRequired, authMode } = useAuth();
 
   if (loading) {
     return <RouteFallback />;
   }
 
-  if (authEnabled && setupRequired) {
+  if (authEnabled && setupRequired && authMode !== 'proxy') {
     return (
       <Suspense fallback={<RouteFallback />}>
         <Routes>

@@ -112,7 +112,7 @@ function sampleImplicitSimulatedAlert(): AlertRecord {
 
 function createAuthSessionCookie(
   database: CrowdsecDatabase,
-  payload: { userId: number; username: string; role: 'admin' | 'read-only'; authMethod: 'password' | 'passkey' | 'oidc' },
+  payload: { userId: number; username: string; role: 'admin' | 'read-only'; authMethod: 'password' | 'passkey' | 'oidc' | 'proxy' },
 ): string {
   const secret = database.getMeta('auth_session_secret')?.value;
   if (!secret) throw new Error('Auth session secret was not initialized');
@@ -5104,5 +5104,206 @@ describe('createApp', () => {
     controller.stopBackgroundTasks();
     database.close();
     destroyTempDir();
+  });
+});
+
+describe('proxy auth mode', () => {
+  function createProxyController(extraEnv: Record<string, string> = {}) {
+    return createController({
+      env: {
+        AUTH_ENABLED: 'true',
+        AUTH_MODE: 'proxy',
+        CROWDSEC_AUTH_PROXY_TRUSTED_IPS: '127.0.0.1/32',
+        CROWDSEC_AUTH_PROXY_HEADER_USER: 'X-Auth-Request-User',
+        CROWDSEC_AUTH_PROXY_HEADER_EMAIL: 'X-Auth-Request-Email',
+        CROWDSEC_AUTH_PROXY_ROLE_SOURCE: 'groups',
+        CROWDSEC_AUTH_PROXY_HEADER_GROUPS: 'X-Auth-Request-Groups',
+        CROWDSEC_AUTH_PROXY_GROUPS_SEPARATOR: ',',
+        CROWDSEC_AUTH_PROXY_ADMIN_GROUPS: 'admins',
+        CROWDSEC_AUTH_PROXY_READ_ONLY_GROUPS: 'viewers',
+        CROWDSEC_AUTH_PROXY_UNMATCHED_ROLE: 'deny',
+        ...extraEnv,
+      },
+    });
+  }
+
+  test('status returns authMode=proxy with no setup required', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/status'));
+    const body = await res.json() as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect(body.authMode).toBe('proxy');
+    expect(body.setupRequired).toBe(false);
+    expect(body.oidcEnabled).toBe(false);
+    expect(body.passwordLoginDisabled).toBe(true);
+    expect(body.passkeysEnabled).toBe(false);
+  });
+
+  test('protected route without auth headers returns 401', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config'));
+    expect(res.status).toBe(401);
+  });
+
+  test('protected route with headers from untrusted IP returns 401', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Auth-Request-User': 'alice',
+        'X-Auth-Request-Groups': 'admins',
+        'X-Forwarded-For': '10.99.99.99', // not in trusted 127.0.0.1/32
+      },
+    }));
+    expect(res.status).toBe(401);
+  });
+
+  test('protected route with valid headers and trusted IP returns 200 and sets session', async () => {
+    const { controller } = createProxyController();
+    // Test harness has no real socket; use X-Forwarded-For to supply the proxy IP for the trust check
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'alice',
+        'X-Auth-Request-Groups': 'admins',
+      },
+    }));
+    expect(res.status).toBe(200);
+    const cookie = res.headers.get('set-cookie');
+    expect(cookie).toContain('crowdsec_web_ui_session=');
+  });
+
+  test('session cookie from proxy auth is reused on subsequent requests', async () => {
+    const { controller } = createProxyController();
+    const first = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'alice',
+        'X-Auth-Request-Groups': 'admins',
+      },
+    }));
+    expect(first.status).toBe(200);
+    const cookie = first.headers.get('set-cookie')!;
+    const sessionCookie = cookie.split(';')[0]; // just the name=value part
+
+    // Second request with the session cookie but no proxy headers — should still pass
+    const second = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: { Cookie: sessionCookie },
+    }));
+    expect(second.status).toBe(200);
+  });
+
+  test('role resolved as read-only from groups header', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'bob',
+        'X-Auth-Request-Groups': 'viewers',
+      },
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { permissions?: { mode?: string } };
+    expect(body.permissions?.mode).toBe('read-only');
+  });
+
+  test('unmatched group with deny policy returns 403', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'eve',
+        'X-Auth-Request-Groups': 'unknown-group',
+      },
+    }));
+    expect(res.status).toBe(403);
+  });
+
+  test('role resolved as admin from direct roles header (ROLE_SOURCE=roles)', async () => {
+    const { controller } = createProxyController({
+      CROWDSEC_AUTH_PROXY_ROLE_SOURCE: 'roles',
+      CROWDSEC_AUTH_PROXY_HEADER_ROLES: 'X-Auth-Request-Roles',
+    });
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'carol',
+        'X-Auth-Request-Roles': 'admin',
+      },
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { permissions?: { mode?: string } };
+    expect(body.permissions?.mode).toBe('admin');
+  });
+
+  test('POST /setup returns 405 in proxy mode', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/setup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'Secret123' }),
+    }));
+    expect(res.status).toBe(405);
+  });
+
+  test('POST /login returns 405 in proxy mode', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'Secret123' }),
+    }));
+    expect(res.status).toBe(405);
+  });
+
+  test('GET /oidc/login returns 405 in proxy mode', async () => {
+    const { controller } = createProxyController();
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/oidc/login'));
+    expect(res.status).toBe(405);
+  });
+
+  test('POST /logout clears session cookie in proxy mode', async () => {
+    const { controller } = createProxyController();
+    // First authenticate
+    const login = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-User': 'alice',
+        'X-Auth-Request-Groups': 'admins',
+      },
+    }));
+    const cookie = login.headers.get('set-cookie')!;
+    const sessionCookie = cookie.split(';')[0];
+
+    // Now logout
+    const logout = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/logout', {
+      method: 'POST',
+      headers: { Cookie: sessionCookie },
+    }));
+    expect(logout.status).toBe(200);
+    const logoutSetCookie = logout.headers.get('set-cookie') ?? '';
+    // Cookie should be cleared (Max-Age=0 or expires in the past)
+    expect(logoutSetCookie).toMatch(/crowdsec_web_ui_session=;|Max-Age=0/i);
+  });
+
+  test('email header used as fallback username when user header absent', async () => {
+    const { controller } = createProxyController();
+    // First request: proxy-auth via email header, get session cookie from a protected route
+    const authRes = await controller.fetch(new Request('http://localhost/crowdsec/api/config', {
+      headers: {
+        'X-Forwarded-For': '127.0.0.1',
+        'X-Auth-Request-Email': 'fallback@example.com',
+        'X-Auth-Request-Groups': 'admins',
+      },
+    }));
+    expect(authRes.status).toBe(200);
+    const sessionCookie = authRes.headers.get('set-cookie')!.split(';')[0];
+
+    // Second request: use cookie to call /me — verifies username was stored from email header
+    const res = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/me', {
+      headers: { Cookie: sessionCookie },
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { user?: { username?: string } };
+    expect(body.user?.username).toBe('fallback@example.com');
   });
 });

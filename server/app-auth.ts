@@ -11,13 +11,13 @@ import {
   type VerifiedRegistrationResponse,
 } from '@simplewebauthn/server';
 import * as oidcClient from 'openid-client';
-import { parseOidcUnmatchedRole, type DashboardAuthConfig, type OidcUnmatchedRole } from './config';
+import { parseOidcUnmatchedRole, type AuthMode, type DashboardAuthConfig, type OidcUnmatchedRole, type ProxyAuthConfig } from './config';
 import { CrowdsecDatabase, type AuthUserRow } from './database';
 
 type HonoContext = any;
 type HonoNext = any;
 type Role = 'admin' | 'read-only';
-type AuthMethod = 'password' | 'passkey' | 'oidc';
+type AuthMethod = 'password' | 'passkey' | 'oidc' | 'proxy';
 type MutableAuthSettingKey =
   | 'disable_password_login'
   | 'oidc_issuer_url'
@@ -54,6 +54,7 @@ export interface SessionData {
 export interface DashboardAuth {
   enabled: boolean;
   oidcEnabled: boolean;
+  authMode: AuthMode;
   ensureAuth: (context: HonoContext, next: HonoNext) => Promise<Response | void>;
   registerRoutes: (app: Hono) => void;
   getSession: (context: HonoContext) => SessionData | null;
@@ -161,6 +162,67 @@ export function resolveOidcRole(config: OidcRoleConfig, groups: string[]): Role 
   return config.oidcUnmatchedRole;
 }
 
+export function isIpTrusted(clientIp: string, trustedCidrs: string[]): boolean {
+  if (trustedCidrs.length === 0) return false;
+  // Normalise: strip IPv6-mapped IPv4 prefix (::ffff:1.2.3.4 → 1.2.3.4)
+  const ip = clientIp.replace(/^::ffff:/, '');
+
+  for (const entry of trustedCidrs) {
+    const slashIdx = entry.indexOf('/');
+    if (slashIdx === -1) {
+      // Exact match
+      if (ip === entry.replace(/^::ffff:/, '')) return true;
+      continue;
+    }
+    const base = entry.slice(0, slashIdx);
+    const prefix = Number.parseInt(entry.slice(slashIdx + 1), 10);
+    // IPv4 only — IPv6 CIDR not supported without a library
+    // ponytail: IPv6 CIDR needs ipaddr.js; add when someone needs it
+    if (!base.includes('.') || ip.includes(':')) continue;
+    const ipParts = ip.split('.').map(Number);
+    const baseParts = base.split('.').map(Number);
+    if (ipParts.length !== 4 || baseParts.length !== 4) continue;
+    const ipNum = (ipParts[0] << 24) | (ipParts[1] << 16) | (ipParts[2] << 8) | ipParts[3];
+    const baseNum = (baseParts[0] << 24) | (baseParts[1] << 16) | (baseParts[2] << 8) | baseParts[3];
+    const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+    if ((ipNum >>> 0 & mask) === (baseNum >>> 0 & mask)) return true;
+  }
+  return false;
+}
+
+export function resolveProxyRole(
+  config: ProxyAuthConfig,
+  headers: Record<string, string | undefined>,
+): Role | null {
+  if (config.roleSource === 'roles') {
+    const roleHeader = headers[config.headerRoles.toLowerCase()];
+    const role = roleHeader?.trim().toLowerCase();
+    if (role === 'admin') return 'admin';
+    if (role === 'read-only') return 'read-only';
+    if (config.unmatchedRole === 'deny') return null;
+    return config.unmatchedRole;
+  }
+  // roleSource === 'groups'
+  const groupsHeader = headers[config.headerGroups.toLowerCase()];
+  const groups = groupsHeader
+    ? groupsHeader.split(config.groupsSeparator).map((g) => g.trim()).filter(Boolean)
+    : [];
+  return resolveOidcRole(
+    { oidcAdminGroups: config.adminGroups, oidcReadOnlyGroups: config.readOnlyGroups, oidcUnmatchedRole: config.unmatchedRole },
+    groups,
+  );
+}
+
+export function extractProxyUsername(
+  config: ProxyAuthConfig,
+  headers: Record<string, string | undefined>,
+): string | null {
+  const user = headers[config.headerUser.toLowerCase()]?.trim();
+  if (user) return user;
+  const email = headers[config.headerEmail.toLowerCase()]?.trim();
+  return email || null;
+}
+
 function encryptSecret(value: string, secret: string): string {
   const key = crypto.createHash('sha256').update(secret, 'utf8').digest();
   const iv = crypto.randomBytes(12);
@@ -251,7 +313,7 @@ function verifySessionToken(token: string, secret: string): SessionData | null {
     if (!payload.exp || payload.exp < Math.floor(Date.now() / 1000)) return null;
     if (typeof payload.userId !== 'number' || typeof payload.username !== 'string') return null;
     const role: Role = payload.role === 'read-only' ? 'read-only' : 'admin';
-    const authMethod = payload.authMethod === 'password' || payload.authMethod === 'passkey' || payload.authMethod === 'oidc'
+    const authMethod = payload.authMethod === 'password' || payload.authMethod === 'passkey' || payload.authMethod === 'oidc' || payload.authMethod === 'proxy'
       ? payload.authMethod
       : undefined;
     return { userId: payload.userId, username: payload.username, role, authMethod };
@@ -412,8 +474,10 @@ export function createDashboardAuth(options: {
   database: CrowdsecDatabase;
   basePath: string;
   instanceReadOnly: boolean;
+  authMode: AuthMode;
+  proxyAuth: ProxyAuthConfig;
 }): DashboardAuth {
-  const { config, database, basePath, instanceReadOnly } = options;
+  const { config, database, basePath, instanceReadOnly, authMode, proxyAuth } = options;
   const enabled = config.enabled ?? !database.isAuthMigrationDefaultDisabled();
   const cookiePath = getCookiePath(basePath);
   const sessionSecret = resolveSessionSecret(database, config.sessionSecret);
@@ -468,6 +532,10 @@ export function createDashboardAuth(options: {
 
   function getSession(context: HonoContext): SessionData | null {
     if (!enabled) return { userId: 0, username: 'disabled-auth', role: 'admin' };
+    // Prefer session already set by middleware (e.g. first proxy-auth request where the
+    // response Set-Cookie hasn't round-tripped back as a request Cookie yet).
+    const ctxUser = context.get('user') as SessionData | undefined;
+    if (ctxUser) return ctxUser;
     const token = getCookie(context, SESSION_COOKIE);
     if (!token) return null;
     return verifySessionToken(token, sessionSecret);
@@ -498,7 +566,63 @@ export function createDashboardAuth(options: {
     };
   }
 
+  async function ensureProxyAuth(context: HonoContext, next: HonoNext): Promise<Response | void> {
+    // Try existing session first (avoids re-reading headers on every request)
+    const existing = getSession(context);
+    if (existing) {
+      context.set('user', existing);
+      refreshSessionIfNeeded(context, existing);
+      await next();
+      return;
+    }
+
+    // No valid session — authenticate from proxy headers
+    // IP trust: prefer the actual TCP connection (socket.remoteAddress) so clients cannot
+    // spoof their source IP via X-Forwarded-For. Fall back to X-Forwarded-For first entry
+    // only when no socket is available (e.g., test harness, upstream load balancer).
+    const raw = context.req.raw as { socket?: { remoteAddress?: string } };
+    const socketIp = raw.socket?.remoteAddress?.replace(/^::ffff:/, '');
+    const forwardedFor = context.req.header('x-forwarded-for');
+    const clientIp = socketIp ?? (forwardedFor ? forwardedFor.split(',')[0]?.trim() : '') ?? '';
+
+    if (!isIpTrusted(clientIp, proxyAuth.trustedIps)) {
+      return context.json({ error: 'Unauthorized' }, 401);
+    }
+
+    // Build a lowercase header map for case-insensitive lookup
+    const headers: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(context.req.header())) {
+      headers[k.toLowerCase()] = v;
+    }
+
+    const username = extractProxyUsername(proxyAuth, headers);
+    if (!username) {
+      return context.json({ error: 'Unauthorized' }, 401);
+    }
+
+    const role = resolveProxyRole(proxyAuth, headers);
+    if (!role) {
+      return context.json({ error: 'Forbidden' }, 403);
+    }
+
+    const user = database.upsertOidcUser(username, role);
+    createSession(context, user, 'proxy');
+    // Build SessionData directly — getSession reads request cookies which don't yet
+    // contain the newly-issued session on the first proxy-auth request.
+    const proxySession: SessionData = {
+      userId: user.id,
+      username: user.username,
+      role: user.role as Role,
+      authMethod: 'proxy',
+    };
+    context.set('user', proxySession);
+    await next();
+  }
+
   async function ensureAuth(context: HonoContext, next: HonoNext): Promise<Response | void> {
+    if (authMode === 'proxy') {
+      return ensureProxyAuth(context, next);
+    }
     if (!enabled) {
       await next();
       return;
@@ -526,24 +650,29 @@ export function createDashboardAuth(options: {
 
   function registerRoutes(app: Hono): void {
     const auth = new Hono();
+    const proxyMode = authMode === 'proxy';
+    const proxyDisabled = (ctx: HonoContext) =>
+      ctx.json({ error: 'Unavailable in proxy auth mode' }, 405);
 
     auth.get('/status', (context) => {
       const session = getSession(context);
       const user = session ? database.getAuthUserById(session.userId) : null;
       return context.json({
-        authEnabled: enabled,
-        setupRequired: enabled && database.countAuthUsers() === 0,
-        authenticated: !enabled || Boolean(session),
-        user: enabled ? session : null,
-        authMethod: enabled ? session?.authMethod ?? null : null,
-        oidcEnabled: enabled && oidc.enabled,
-        passwordLoginDisabled: enabled && isPasswordLoginDisabled(),
-        passkeysEnabled: enabled && database.countWebAuthnCredentials() > 0,
-        hasPassword: Boolean(user?.password_hash),
+        authEnabled: proxyMode ? true : enabled,
+        setupRequired: proxyMode ? false : (enabled && database.countAuthUsers() === 0),
+        authenticated: proxyMode ? Boolean(session) : (!enabled || Boolean(session)),
+        user: (proxyMode || enabled) ? session : null,
+        authMethod: (proxyMode || enabled) ? (session?.authMethod ?? null) : null,
+        oidcEnabled: proxyMode ? false : (enabled && oidc.enabled),
+        passwordLoginDisabled: proxyMode ? true : (enabled && isPasswordLoginDisabled()),
+        passkeysEnabled: proxyMode ? false : (enabled && database.countWebAuthnCredentials() > 0),
+        hasPassword: proxyMode ? false : Boolean(user?.password_hash),
+        authMode,
       });
     });
 
     auth.post('/setup', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled) return context.json({ error: 'Authentication is disabled' }, 400);
       if (database.countAuthUsers() > 0) return context.json({ error: 'Setup already completed' }, 400);
       const body = asObject(await context.req.json().catch(() => null));
@@ -565,6 +694,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/login', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled) return context.json({ error: 'Authentication is disabled' }, 400);
       if (isPasswordLoginDisabled()) return context.json({ error: 'Password login is disabled' }, 403);
       const body = asObject(await context.req.json().catch(() => null));
@@ -595,6 +725,11 @@ export function createDashboardAuth(options: {
     });
 
     auth.get('/settings', (context) => {
+      if (proxyMode) {
+        const session = getSession(context);
+        if (!session) return context.json({ error: 'Not authenticated' }, 401);
+        return context.json({ authMode: 'proxy' });
+      }
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const effectiveConfig = getEffectiveConfig();
@@ -614,6 +749,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.put('/settings', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       if (session.role !== 'admin' || instanceReadOnly) return context.json({ error: 'Read-only mode is enabled', code: 'READ_ONLY' }, 403);
@@ -702,6 +838,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/change-password', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const body = asObject(await context.req.json().catch(() => null));
@@ -725,6 +862,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.get('/passkeys', (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       return context.json({
@@ -737,6 +875,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.patch('/passkeys/:id', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const id = Number(context.req.param('id'));
@@ -749,6 +888,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.delete('/passkeys/:id', (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const id = Number(context.req.param('id'));
@@ -759,6 +899,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/webauthn/register/options', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const origin = getPublicOrigin(context);
@@ -768,6 +909,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/webauthn/register/verify', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       const session = getSession(context);
       if (!session || !enabled) return context.json({ error: 'Not authenticated' }, 401);
       const body = asObject(await context.req.json().catch(() => null));
@@ -800,6 +942,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/webauthn/login/options', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled) return context.json({ error: 'Authentication is disabled' }, 400);
       const body = asObject(await context.req.json().catch(() => null));
       const username = typeof body?.username === 'string' ? body.username.trim() : undefined;
@@ -810,6 +953,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.post('/webauthn/login/verify', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled) return context.json({ error: 'Authentication is disabled' }, 400);
       const body = asObject(await context.req.json().catch(() => null));
       const challenge = getCookie(context, CHALLENGE_COOKIE);
@@ -838,6 +982,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.get('/oidc/login', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled || !oidc.enabled) return context.json({ error: 'OIDC not configured' }, 400);
       const origin = getPublicOrigin(context);
       const redirectUri = `${origin}${basePath}/api/auth/oidc/callback`;
@@ -850,6 +995,7 @@ export function createDashboardAuth(options: {
     });
 
     auth.get('/oidc/callback', async (context) => {
+      if (proxyMode) return proxyDisabled(context);
       if (!enabled || !oidc.enabled) return context.json({ error: 'OIDC not configured' }, 400);
       const nonce = getCookie(context, OIDC_NONCE_COOKIE);
       const state = getCookie(context, OIDC_STATE_COOKIE);
@@ -880,6 +1026,7 @@ export function createDashboardAuth(options: {
   return {
     enabled,
     oidcEnabled: oidc.enabled,
+    authMode,
     ensureAuth,
     registerRoutes,
     getSession,

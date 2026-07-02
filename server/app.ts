@@ -355,6 +355,8 @@ export function createApp(options: CreateAppOptions = {}): AppController {
     database,
     basePath: config.basePath,
     instanceReadOnly: config.readOnly,
+    authMode: config.authMode,
+    proxyAuth: config.proxyAuth,
   });
 
   const app = new Hono();
@@ -425,6 +427,7 @@ export function createApp(options: CreateAppOptions = {}): AppController {
   Time Zone: ${config.timeZone || 'Browser local'}
   Time Format: ${config.timeFormat}
   Dashboard Auth: ${dashboardAuth.enabled ? 'Enabled' : 'Disabled'}
+  Dashboard Auth Mode: ${dashboardAuth.authMode}
   Dashboard OIDC: ${dashboardAuth.oidcEnabled ? 'Enabled' : 'Disabled'}
   Read-only Mode: ${config.readOnly ? 'Enabled' : 'Disabled'}
 `);

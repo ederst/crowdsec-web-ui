@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { createRuntimeConfig, getIntervalName, parseBooleanEnv, parseCsvEnv, parseLookbackToMs, parseOidcUnmatchedRole, parseOptionalBooleanEnv, parseRefreshInterval, parseTimeFormat, parseTimeZone } from './config';
+import { createRuntimeConfig, getIntervalName, parseBooleanEnv, parseCsvEnv, parseLookbackToMs, parseOidcUnmatchedRole, parseOptionalBooleanEnv, parseRefreshInterval, parseTimeFormat, parseTimeZone, parseAuthMode, parseProxyRoleSource } from './config';
 
 const tempDirs: string[] = [];
 
@@ -388,5 +388,82 @@ describe('config helpers', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+describe('proxy auth config', () => {
+  test('parseAuthMode defaults to local', () => {
+    expect(parseAuthMode(undefined)).toBe('local');
+    expect(parseAuthMode('')).toBe('local');
+    expect(parseAuthMode('local')).toBe('local');
+    expect(parseAuthMode('LOCAL')).toBe('local');
+  });
+
+  test('parseAuthMode accepts proxy', () => {
+    expect(parseAuthMode('proxy')).toBe('proxy');
+    expect(parseAuthMode('PROXY')).toBe('proxy');
+  });
+
+  test('parseAuthMode throws on invalid value', () => {
+    expect(() => parseAuthMode('invalid')).toThrow(/AUTH_MODE/);
+    expect(() => parseAuthMode('oidc')).toThrow(/AUTH_MODE/);
+  });
+
+  test('parseProxyRoleSource defaults to groups', () => {
+    expect(parseProxyRoleSource(undefined)).toBe('groups');
+    expect(parseProxyRoleSource('')).toBe('groups');
+    expect(parseProxyRoleSource('groups')).toBe('groups');
+    expect(parseProxyRoleSource('GROUPS')).toBe('groups');
+  });
+
+  test('parseProxyRoleSource accepts roles', () => {
+    expect(parseProxyRoleSource('roles')).toBe('roles');
+    expect(parseProxyRoleSource('ROLES')).toBe('roles');
+  });
+
+  test('parseProxyRoleSource throws on invalid value', () => {
+    expect(() => parseProxyRoleSource('invalid')).toThrow(/ROLE_SOURCE/);
+  });
+
+  test('createRuntimeConfig includes proxy auth config with defaults', () => {
+    const config = createRuntimeConfig({});
+    expect(config.authMode).toBe('local');
+    expect(config.proxyAuth.trustedIps).toEqual([]);
+    expect(config.proxyAuth.headerUser).toBe('X-Auth-Request-User');
+    expect(config.proxyAuth.headerEmail).toBe('X-Auth-Request-Email');
+    expect(config.proxyAuth.roleSource).toBe('groups');
+    expect(config.proxyAuth.headerGroups).toBe('X-Auth-Request-Groups');
+    expect(config.proxyAuth.groupsSeparator).toBe(',');
+    expect(config.proxyAuth.adminGroups).toEqual([]);
+    expect(config.proxyAuth.readOnlyGroups).toEqual([]);
+    expect(config.proxyAuth.unmatchedRole).toBe('deny');
+    expect(config.proxyAuth.headerRoles).toBe('X-Auth-Request-Roles');
+  });
+
+  test('createRuntimeConfig reads proxy auth env vars', () => {
+    const config = createRuntimeConfig({
+      AUTH_MODE: 'proxy',
+      CROWDSEC_AUTH_PROXY_TRUSTED_IPS: '127.0.0.1/32, 10.0.0.0/8',
+      CROWDSEC_AUTH_PROXY_HEADER_USER: 'X-Forwarded-User',
+      CROWDSEC_AUTH_PROXY_HEADER_EMAIL: 'X-Forwarded-Email',
+      CROWDSEC_AUTH_PROXY_ROLE_SOURCE: 'roles',
+      CROWDSEC_AUTH_PROXY_HEADER_GROUPS: 'X-Forwarded-Groups',
+      CROWDSEC_AUTH_PROXY_GROUPS_SEPARATOR: '|',
+      CROWDSEC_AUTH_PROXY_ADMIN_GROUPS: 'admins,superusers',
+      CROWDSEC_AUTH_PROXY_READ_ONLY_GROUPS: 'viewers',
+      CROWDSEC_AUTH_PROXY_UNMATCHED_ROLE: 'read-only',
+      CROWDSEC_AUTH_PROXY_HEADER_ROLES: 'X-Forwarded-Roles',
+    });
+    expect(config.authMode).toBe('proxy');
+    expect(config.proxyAuth.trustedIps).toEqual(['127.0.0.1/32', '10.0.0.0/8']);
+    expect(config.proxyAuth.headerUser).toBe('X-Forwarded-User');
+    expect(config.proxyAuth.headerEmail).toBe('X-Forwarded-Email');
+    expect(config.proxyAuth.roleSource).toBe('roles');
+    expect(config.proxyAuth.headerGroups).toBe('X-Forwarded-Groups');
+    expect(config.proxyAuth.groupsSeparator).toBe('|');
+    expect(config.proxyAuth.adminGroups).toEqual(['admins', 'superusers']);
+    expect(config.proxyAuth.readOnlyGroups).toEqual(['viewers']);
+    expect(config.proxyAuth.unmatchedRole).toBe('read-only');
+    expect(config.proxyAuth.headerRoles).toBe('X-Forwarded-Roles');
   });
 });

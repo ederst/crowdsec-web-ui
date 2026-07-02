@@ -19,6 +19,7 @@ export interface AuthStatus {
   passwordLoginDisabled: boolean;
   passkeysEnabled: boolean;
   hasPassword: boolean;
+  authMode: 'local' | 'proxy';
 }
 
 interface AuthContextValue extends AuthStatus {
@@ -39,11 +40,13 @@ const DEFAULT_STATUS: AuthStatus = {
   passwordLoginDisabled: false,
   passkeysEnabled: false,
   hasPassword: false,
+  authMode: 'local',
 };
 
 const fallbackAuthContext: AuthContextValue = {
   ...DEFAULT_STATUS,
   authEnabled: false,
+  authMode: 'local',
   authenticated: true,
   loading: false,
   refresh: async () => undefined,

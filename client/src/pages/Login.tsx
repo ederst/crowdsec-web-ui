@@ -9,13 +9,13 @@ import {
 } from '../lib/webauthn';
 
 export function Login() {
-  const { authEnabled, authenticated, login, oidcEnabled, passwordLoginDisabled, passkeysEnabled, refresh } = useAuth();
+  const { authEnabled, authenticated, authMode, login, oidcEnabled, passwordLoginDisabled, passkeysEnabled, refresh } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  if (!authEnabled || authenticated) {
+  if (!authEnabled || authenticated || authMode === 'proxy') {
     return <Navigate to="/" replace />;
   }
 

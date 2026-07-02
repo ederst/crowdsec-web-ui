@@ -4,6 +4,8 @@ import { resolveSecretEnv } from './env-secrets';
 export type AlertFilterMode = 'default' | 'new' | 'legacy';
 export type TimeFormat = 'browser' | '12h' | '24h';
 export type OidcUnmatchedRole = 'deny' | 'admin' | 'read-only';
+export type AuthMode = 'local' | 'proxy';
+export type ProxyRoleSource = 'groups' | 'roles';
 
 export interface DashboardAuthConfig {
   enabled: boolean | null;
@@ -15,6 +17,19 @@ export interface DashboardAuthConfig {
   oidcAdminGroups: string[];
   oidcReadOnlyGroups: string[];
   oidcUnmatchedRole: OidcUnmatchedRole;
+}
+
+export interface ProxyAuthConfig {
+  trustedIps: string[];
+  headerUser: string;
+  headerEmail: string;
+  roleSource: ProxyRoleSource;
+  headerGroups: string;
+  groupsSeparator: string;
+  adminGroups: string[];
+  readOnlyGroups: string[];
+  unmatchedRole: OidcUnmatchedRole;
+  headerRoles: string;
 }
 
 export interface RuntimeConfig {
@@ -62,6 +77,8 @@ export interface RuntimeConfig {
   timeFormat: TimeFormat;
   readOnly: boolean;
   dashboardAuth: DashboardAuthConfig;
+  authMode: AuthMode;
+  proxyAuth: ProxyAuthConfig;
 }
 
 export function parseTimeZone(value: string | undefined): string | null {
@@ -137,6 +154,35 @@ export function parseOidcUnmatchedRole(value: string | undefined): OidcUnmatched
   if (!normalized) return 'deny';
   if (normalized === 'deny' || normalized === 'admin' || normalized === 'read-only') return normalized;
   throw new Error('Invalid CROWDSEC_AUTH_OIDC_UNMATCHED_ROLE value. Must be one of: deny, admin, read-only.');
+}
+
+export function parseAuthMode(value: string | undefined): AuthMode {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === 'local') return 'local';
+  if (normalized === 'proxy') return 'proxy';
+  throw new Error('Invalid AUTH_MODE value. Must be one of: local, proxy.');
+}
+
+export function parseProxyRoleSource(value: string | undefined): ProxyRoleSource {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized || normalized === 'groups') return 'groups';
+  if (normalized === 'roles') return 'roles';
+  throw new Error('Invalid CROWDSEC_AUTH_PROXY_ROLE_SOURCE value. Must be one of: groups, roles.');
+}
+
+function parseProxyAuthConfig(env: NodeJS.ProcessEnv): ProxyAuthConfig {
+  return {
+    trustedIps: parseCsvEnv(env.CROWDSEC_AUTH_PROXY_TRUSTED_IPS),
+    headerUser: env.CROWDSEC_AUTH_PROXY_HEADER_USER?.trim() || 'X-Auth-Request-User',
+    headerEmail: env.CROWDSEC_AUTH_PROXY_HEADER_EMAIL?.trim() || 'X-Auth-Request-Email',
+    roleSource: parseProxyRoleSource(env.CROWDSEC_AUTH_PROXY_ROLE_SOURCE),
+    headerGroups: env.CROWDSEC_AUTH_PROXY_HEADER_GROUPS?.trim() || 'X-Auth-Request-Groups',
+    groupsSeparator: env.CROWDSEC_AUTH_PROXY_GROUPS_SEPARATOR ?? ',',
+    adminGroups: parseCsvEnv(env.CROWDSEC_AUTH_PROXY_ADMIN_GROUPS),
+    readOnlyGroups: parseCsvEnv(env.CROWDSEC_AUTH_PROXY_READ_ONLY_GROUPS),
+    unmatchedRole: parseOidcUnmatchedRole(env.CROWDSEC_AUTH_PROXY_UNMATCHED_ROLE),
+    headerRoles: env.CROWDSEC_AUTH_PROXY_HEADER_ROLES?.trim() || 'X-Auth-Request-Roles',
+  };
 }
 
 export function parseCsvEnv(value: string | undefined): string[] {
@@ -337,5 +383,7 @@ export function createRuntimeConfig(env: NodeJS.ProcessEnv = process.env): Runti
     timeFormat: parseTimeFormat(env.CROWDSEC_TIME_FORMAT),
     readOnly: parseBooleanEnv(env.PERMISSION_READ_ONLY, false),
     dashboardAuth: parseDashboardAuthConfig(env),
+    authMode: parseAuthMode(env.AUTH_MODE),
+    proxyAuth: parseProxyAuthConfig(env),
   };
 }
