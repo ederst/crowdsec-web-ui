@@ -265,6 +265,7 @@ Choose exactly one auth mode: password auth or mTLS auth.
 | `CROWDSEC_AUTH_OIDC_CLIENT_ID` | none | Optional OIDC client ID. Can also be configured from Settings. |
 | `CROWDSEC_AUTH_OIDC_CLIENT_SECRET` | none | Optional OIDC client secret. Can also be configured from Settings. |
 | `CROWDSEC_AUTH_OIDC_CLIENT_SECRET_FILE` | none | Optional Docker Secrets alternative: read `CROWDSEC_AUTH_OIDC_CLIENT_SECRET` from a file. Do not set both variables. |
+| `CROWDSEC_AUTH_OIDC_CLIENT_ASSERTION_FILE` | none | Optional path to a file containing a JWT used as a `client_assertion` for OIDC token requests (e.g. a Kubernetes projected service account token for [Workload Identity Federation](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation)). When set, `CROWDSEC_AUTH_OIDC_CLIENT_SECRET` is ignored. |
 | `CROWDSEC_AUTH_OIDC_SCOPE` | `openid profile email` | Optional OIDC authorization scope string. Must include `openid`. Can also be configured from Settings. |
 | `CROWDSEC_AUTH_OIDC_GROUPS_CLAIM` | `groups` | Optional OIDC claim used for group mapping. The claim may be an array or a comma-separated string. Can also be configured from Settings. |
 | `CROWDSEC_AUTH_OIDC_ADMIN_GROUPS` | empty | Optional comma-separated OIDC groups that receive admin permissions. Can also be configured from Settings. |

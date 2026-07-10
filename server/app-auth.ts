@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -34,6 +35,7 @@ interface EffectiveAuthConfig {
   oidcIssuerUrl?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
+  oidcClientAssertionFile?: string;
   oidcScope: string;
   oidcGroupsClaim: string;
   oidcAdminGroups: string[];
@@ -455,12 +457,21 @@ class OidcRuntime {
     if (!this.enabled) {
       throw new Error('OIDC is not configured');
     }
-    const nextCacheKey = `${config.oidcIssuerUrl || ''}\n${config.oidcClientId || ''}\n${config.oidcClientSecret || ''}`;
+    const nextCacheKey = `${config.oidcIssuerUrl || ''}\n${config.oidcClientId || ''}\n${config.oidcClientSecret || ''}\n${config.oidcClientAssertionFile || ''}`;
     if (!this.configuration || this.cacheKey !== nextCacheKey) {
+      let clientAuth: oidcClient.ClientAuth | undefined;
+      if (config.oidcClientAssertionFile) {
+        const assertionFile = config.oidcClientAssertionFile;
+        clientAuth = (_as, _client, body) => {
+          body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+          body.set('client_assertion', fs.readFileSync(assertionFile, 'utf8').trim());
+        };
+      }
       this.configuration = await oidcClient.discovery(
         new URL(config.oidcIssuerUrl!),
         config.oidcClientId!,
-        config.oidcClientSecret || undefined,
+        clientAuth ? undefined : (config.oidcClientSecret || undefined),
+        clientAuth,
       );
       this.cacheKey = nextCacheKey;
     }
@@ -537,6 +548,7 @@ export function createDashboardAuth(options: {
       oidcIssuerUrl: readAuthSetting(database, 'oidc_issuer_url') ?? config.oidcIssuerUrl,
       oidcClientId: readAuthSetting(database, 'oidc_client_id') ?? config.oidcClientId,
       oidcClientSecret,
+      oidcClientAssertionFile: config.oidcClientAssertionFile,
       oidcScope: readAuthSetting(database, 'oidc_scope')?.trim() || config.oidcScope,
       oidcGroupsClaim: readAuthSetting(database, 'oidc_groups_claim') || config.oidcGroupsClaim || 'groups',
       oidcAdminGroups: parseCsvList(readAuthSetting(database, 'oidc_admin_groups') ?? config.oidcAdminGroups.join(',')),
