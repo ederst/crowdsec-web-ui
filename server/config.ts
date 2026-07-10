@@ -12,6 +12,7 @@ export interface DashboardAuthConfig {
   oidcIssuerUrl?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
+  oidcClientAssertionFile?: string;
   oidcScope: string;
   oidcGroupsClaim: string;
   oidcAdminGroups: string[];
@@ -178,6 +179,7 @@ function parseDashboardAuthConfig(env: NodeJS.ProcessEnv): DashboardAuthConfig {
     oidcIssuerUrl: env.CROWDSEC_AUTH_OIDC_ISSUER_URL?.trim() || undefined,
     oidcClientId: env.CROWDSEC_AUTH_OIDC_CLIENT_ID?.trim() || undefined,
     oidcClientSecret: resolveSecretEnv('CROWDSEC_AUTH_OIDC_CLIENT_SECRET', env)?.trim() || undefined,
+    oidcClientAssertionFile: env.CROWDSEC_AUTH_OIDC_CLIENT_ASSERTION_FILE?.trim() || undefined,
     oidcScope: parseOidcScope(env.CROWDSEC_AUTH_OIDC_SCOPE),
     oidcGroupsClaim: env.CROWDSEC_AUTH_OIDC_GROUPS_CLAIM?.trim() || 'groups',
     oidcAdminGroups: parseCsvEnv(env.CROWDSEC_AUTH_OIDC_ADMIN_GROUPS),
