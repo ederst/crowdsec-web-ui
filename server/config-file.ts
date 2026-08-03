@@ -33,11 +33,13 @@ export const DEPRECATED_CONFIG_ENV = [
   'AUTH_SECRET_FILE', 'AUTH_TOTP_SECRET_FILE', 'AUTH_TOTP_SEED_FILE',
   'AUTH_OIDC_ISSUER_URL', 'AUTH_OIDC_CLIENT_ID', 'AUTH_OIDC_CLIENT_SECRET_FILE', 'AUTH_OIDC_SCOPE',
   'AUTH_OIDC_GROUPS_CLAIM', 'AUTH_OIDC_ADMIN_GROUPS', 'AUTH_OIDC_READ_ONLY_GROUPS', 'AUTH_OIDC_UNMATCHED_ROLE',
+  'AUTH_OIDC_CLIENT_AUTH_METHOD', 'AUTH_OIDC_FEDERATED_TOKEN_FILE',
   'CROWDSEC_AUTH_SECRET', 'CROWDSEC_AUTH_SECRET_FILE', 'CROWDSEC_AUTH_TOTP_SECRET', 'CROWDSEC_AUTH_TOTP_SECRET_FILE',
   'CROWDSEC_AUTH_TOTP_SEED', 'CROWDSEC_AUTH_TOTP_SEED_FILE', 'CROWDSEC_AUTH_OIDC_ISSUER_URL',
   'CROWDSEC_AUTH_OIDC_CLIENT_ID', 'CROWDSEC_AUTH_OIDC_CLIENT_SECRET', 'CROWDSEC_AUTH_OIDC_CLIENT_SECRET_FILE',
   'CROWDSEC_AUTH_OIDC_SCOPE', 'CROWDSEC_AUTH_OIDC_GROUPS_CLAIM', 'CROWDSEC_AUTH_OIDC_ADMIN_GROUPS',
   'CROWDSEC_AUTH_OIDC_READ_ONLY_GROUPS', 'CROWDSEC_AUTH_OIDC_UNMATCHED_ROLE',
+  'CROWDSEC_AUTH_OIDC_CLIENT_AUTH_METHOD', 'CROWDSEC_AUTH_OIDC_FEDERATED_TOKEN_FILE',
   'CROWDSEC_INSTANCES_CONFIG_FILE', 'CROWDSEC_URL', 'CROWDSEC_USER', 'CROWDSEC_PASSWORD_FILE',
   'CROWDSEC_TLS_CERT_PATH', 'CROWDSEC_TLS_KEY_PATH', 'CROWDSEC_TLS_CA_CERT_PATH',
   'CROWDSEC_INSTANCE_NAME', 'CROWDSEC_INSTANCE_ICON', 'CROWDSEC_PROMETHEUS_URL',
@@ -189,10 +191,12 @@ export function parseApplicationConfig(parsed: unknown, sourceEnv: NodeJS.Proces
   applySecretReference(auth.totpSecret, 'auth.totpSecret', env, sourceEnv, 'AUTH_TOTP_SECRET');
   applySecretReference(auth.totpSeed, 'auth.totpSeed', env, sourceEnv, 'AUTH_TOTP_SEED');
   const oidc = auth.oidc === undefined ? {} : record(auth.oidc, 'auth.oidc');
-  knownKeys(oidc, ['issuerUrl', 'clientId', 'clientSecret', 'scope', 'groupsClaim', 'adminGroups', 'readOnlyGroups', 'unmatchedRole'], 'auth.oidc');
+  knownKeys(oidc, ['issuerUrl', 'clientId', 'clientSecret', 'clientAuthMethod', 'federatedTokenFile', 'scope', 'groupsClaim', 'adminGroups', 'readOnlyGroups', 'unmatchedRole'], 'auth.oidc');
   setString(env, oidc, 'issuerUrl', 'AUTH_OIDC_ISSUER_URL', 'auth.oidc');
   setString(env, oidc, 'clientId', 'AUTH_OIDC_CLIENT_ID', 'auth.oidc');
   applySecretReference(oidc.clientSecret, 'auth.oidc.clientSecret', env, sourceEnv, 'AUTH_OIDC_CLIENT_SECRET');
+  setString(env, oidc, 'clientAuthMethod', 'AUTH_OIDC_CLIENT_AUTH_METHOD', 'auth.oidc');
+  setString(env, oidc, 'federatedTokenFile', 'AUTH_OIDC_FEDERATED_TOKEN_FILE', 'auth.oidc');
   setString(env, oidc, 'scope', 'AUTH_OIDC_SCOPE', 'auth.oidc');
   setString(env, oidc, 'groupsClaim', 'AUTH_OIDC_GROUPS_CLAIM', 'auth.oidc');
   setArray(env, oidc, 'adminGroups', 'AUTH_OIDC_ADMIN_GROUPS', 'auth.oidc');
@@ -300,7 +304,7 @@ export const CONFIG_KEY_ORDER = new Map<string, readonly string[]>([
   ['ui', ['timeZone', 'timeFormat', 'readOnly']],
   ['updates', ['enabled']],
   ['auth', ['enabled', 'sessionSecret', 'totpSecret', 'totpSeed', 'oidc']],
-  ['auth.oidc', ['issuerUrl', 'clientId', 'clientSecret', 'scope', 'groupsClaim', 'adminGroups', 'readOnlyGroups', 'unmatchedRole']],
+  ['auth.oidc', ['issuerUrl', 'clientId', 'clientSecret', 'clientAuthMethod', 'federatedTokenFile', 'scope', 'groupsClaim', 'adminGroups', 'readOnlyGroups', 'unmatchedRole']],
   ['notifications', ['secretKey', 'allowPrivateAddresses', 'debugPayloads']],
   ['crowdsec', ['simulationsEnabled', 'alertFilters', 'sync']],
   ['crowdsec.alertFilters', ['includeOrigins', 'excludeOrigins', 'includeCapi', 'includeOriginEmpty', 'excludeOriginEmpty', 'legacy']],
@@ -390,6 +394,10 @@ const LEGACY_GENERATED_CONFIG_PATHS = [
   ['CROWDSEC_AUTH_OIDC_CLIENT_SECRET_FILE', ['auth', 'oidc', 'clientSecret']],
   ['AUTH_OIDC_SCOPE', ['auth', 'oidc', 'scope']],
   ['CROWDSEC_AUTH_OIDC_SCOPE', ['auth', 'oidc', 'scope']],
+  ['AUTH_OIDC_CLIENT_AUTH_METHOD', ['auth', 'oidc', 'clientAuthMethod']],
+  ['CROWDSEC_AUTH_OIDC_CLIENT_AUTH_METHOD', ['auth', 'oidc', 'clientAuthMethod']],
+  ['AUTH_OIDC_FEDERATED_TOKEN_FILE', ['auth', 'oidc', 'federatedTokenFile']],
+  ['CROWDSEC_AUTH_OIDC_FEDERATED_TOKEN_FILE', ['auth', 'oidc', 'federatedTokenFile']],
   ['AUTH_OIDC_GROUPS_CLAIM', ['auth', 'oidc', 'groupsClaim']],
   ['CROWDSEC_AUTH_OIDC_GROUPS_CLAIM', ['auth', 'oidc', 'groupsClaim']],
   ['AUTH_OIDC_ADMIN_GROUPS', ['auth', 'oidc', 'adminGroups']],
@@ -500,6 +508,8 @@ export function generateApplicationConfig(env: NodeJS.ProcessEnv, config: Runtim
         ...(config.dashboardAuth.oidcIssuerUrl ? { issuerUrl: config.dashboardAuth.oidcIssuerUrl } : {}),
         ...(config.dashboardAuth.oidcClientId ? { clientId: config.dashboardAuth.oidcClientId } : {}),
         ...(secretReference(env, 'AUTH_OIDC_CLIENT_SECRET', 'CROWDSEC_AUTH_OIDC_CLIENT_SECRET') ? { clientSecret: secretReference(env, 'AUTH_OIDC_CLIENT_SECRET', 'CROWDSEC_AUTH_OIDC_CLIENT_SECRET') } : {}),
+        clientAuthMethod: config.dashboardAuth.oidcClientAuthMethod,
+        ...(config.dashboardAuth.oidcFederatedTokenFile ? { federatedTokenFile: config.dashboardAuth.oidcFederatedTokenFile } : {}),
         scope: config.dashboardAuth.oidcScope,
         groupsClaim: config.dashboardAuth.oidcGroupsClaim,
         adminGroups: config.dashboardAuth.oidcAdminGroups,
@@ -580,6 +590,8 @@ const CONFIG_VALUE_ENV = [
   ['CONFIG_AUTH_ENABLED', ['auth', 'enabled']],
   ['CONFIG_AUTH_OIDC_ISSUER_URL', ['auth', 'oidc', 'issuerUrl']],
   ['CONFIG_AUTH_OIDC_CLIENT_ID', ['auth', 'oidc', 'clientId']],
+  ['CONFIG_AUTH_OIDC_CLIENT_AUTH_METHOD', ['auth', 'oidc', 'clientAuthMethod']],
+  ['CONFIG_AUTH_OIDC_FEDERATED_TOKEN_FILE', ['auth', 'oidc', 'federatedTokenFile']],
   ['CONFIG_AUTH_OIDC_SCOPE', ['auth', 'oidc', 'scope']],
   ['CONFIG_AUTH_OIDC_GROUPS_CLAIM', ['auth', 'oidc', 'groupsClaim']],
   ['CONFIG_AUTH_OIDC_ADMIN_GROUPS', ['auth', 'oidc', 'adminGroups']],
@@ -1304,6 +1316,8 @@ function initialConfigReference(document: UnknownRecord): UnknownRecord {
         issuerUrl: 'https://idp.example.com/application/o/crowdsec/',
         clientId: 'crowdsec-web-ui',
         clientSecret: { file: '/run/secrets/oidc_client_secret' },
+        clientAuthMethod: 'client_secret',
+        federatedTokenFile: '/var/run/secrets/oidc-federated-token',
         ...oidc,
       },
     },

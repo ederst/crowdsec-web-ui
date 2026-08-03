@@ -44,6 +44,8 @@
 #     clientId: crowdsec-web-ui
 #     clientSecret:
 #       file: /run/secrets/oidc_client_secret
+#     clientAuthMethod: client_secret # client_secret or workload_identity
+#     federatedTokenFile: /var/run/secrets/oidc-federated-token
 #     scope: openid profile email
 #     groupsClaim: groups
 #     adminGroups: []

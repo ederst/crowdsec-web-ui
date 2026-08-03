@@ -1,9 +1,13 @@
 import { describe, expect, test, vi } from 'vitest';
 import { generate } from 'otplib';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as oidcClient from 'openid-client';
 import { resolveOidcClaims, resolveOidcRole } from '../../app-auth';
 import {
   createAuthSessionCookie,
   createController,
+  tempDir,
 } from './harness';
 
 test('dashboard auth protects API routes and allows initial setup login', async () => {
@@ -215,6 +219,8 @@ test('dashboard auth exposes account settings and password changes', async () =>
     oidcIssuerUrl: '',
     oidcClientId: '',
     hasOidcClientSecret: false,
+    oidcClientAuthMethod: 'client_secret',
+    oidcFederatedTokenFile: '',
     oidcScope: 'openid profile email',
     oidcGroupsClaim: 'groups',
     oidcAdminGroups: '',
@@ -269,6 +275,35 @@ test('dashboard auth exposes account settings and password changes', async () =>
       oidcReadOnlyGroups: 'viewers',
       oidcUnmatchedRole: 'admin',
     },
+  });
+
+  const saveClientAuthMethod = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', cookie },
+    body: JSON.stringify({
+      oidcClientAuthMethod: 'workload_identity',
+      oidcFederatedTokenFile: '  /var/run/secrets/tokens/oidc-jwt  ',
+    }),
+  }));
+  expect(saveClientAuthMethod.status).toBe(200);
+  expect(await saveClientAuthMethod.json()).toMatchObject({
+    settings: {
+      oidcClientAuthMethod: 'workload_identity',
+      oidcFederatedTokenFile: '/var/run/secrets/tokens/oidc-jwt',
+    },
+  });
+
+  expect(database.getMeta('auth_oidc_client_auth_method')?.value).toBe('workload_identity');
+  expect(database.getMeta('auth_oidc_federated_token_file')?.value).toBe('/var/run/secrets/tokens/oidc-jwt');
+
+  const invalidClientAuthMethod = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', cookie },
+    body: JSON.stringify({ oidcClientAuthMethod: 'private_key_jwt' }),
+  }));
+  expect(invalidClientAuthMethod.status).toBe(400);
+  expect(await invalidClientAuthMethod.json()).toMatchObject({
+    error: 'Invalid OIDC client authentication method',
   });
 
   const invalidScope = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/settings', {
@@ -678,6 +713,8 @@ test('dashboard auth settings use OIDC environment values as defaults', async ()
       AUTH_OIDC_ISSUER_URL: 'https://idp.example.com/application/o/crowdsec/',
       AUTH_OIDC_CLIENT_ID: 'crowdsec-client',
       AUTH_OIDC_CLIENT_SECRET: 'oidc-secret',
+      AUTH_OIDC_CLIENT_AUTH_METHOD: 'workload_identity',
+      AUTH_OIDC_FEDERATED_TOKEN_FILE: '/var/run/secrets/tokens/oidc-jwt',
       AUTH_OIDC_SCOPE: 'openid profile email roles',
       AUTH_OIDC_GROUPS_CLAIM: 'roles',
       AUTH_OIDC_ADMIN_GROUPS: 'admins,secops',
@@ -701,12 +738,58 @@ test('dashboard auth settings use OIDC environment values as defaults', async ()
     oidcIssuerUrl: 'https://idp.example.com/application/o/crowdsec/',
     oidcClientId: 'crowdsec-client',
     hasOidcClientSecret: true,
+    oidcClientAuthMethod: 'workload_identity',
+    oidcFederatedTokenFile: '/var/run/secrets/tokens/oidc-jwt',
     oidcScope: 'openid profile email roles',
     oidcGroupsClaim: 'roles',
     oidcAdminGroups: 'admins,secops',
     oidcReadOnlyGroups: 'viewers',
     oidcUnmatchedRole: 'read-only',
   });
+});
+
+test('OIDC runtime uses federated token file as jwt-bearer client assertion', async () => {
+  const tokenPath = join(tempDir, 'oidc-federated-token.jwt');
+  writeFileSync(tokenPath, '  test-federated-jwt  ');
+
+  const discoverySpy = vi.spyOn(oidcClient, 'discovery').mockResolvedValue({
+    serverMetadata: () => ({ authorization_endpoint: 'https://idp.example.com/authorize' }),
+  } as unknown as oidcClient.Configuration);
+
+  const { controller } = createController({
+    env: {
+      AUTH_ENABLED: 'true',
+      AUTH_OIDC_ISSUER_URL: 'https://idp.example.com',
+      AUTH_OIDC_CLIENT_ID: 'crowdsec-client',
+      AUTH_OIDC_CLIENT_SECRET: 'must-be-ignored',
+      AUTH_OIDC_CLIENT_AUTH_METHOD: 'workload_identity',
+      AUTH_OIDC_FEDERATED_TOKEN_FILE: tokenPath,
+    },
+  });
+
+  const setup = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/setup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'Secret123' }),
+  }));
+  const cookie = setup.headers.get('set-cookie') || '';
+
+  const loginResponse = await controller.fetch(new Request('http://localhost/crowdsec/api/auth/oidc/login', {
+    headers: { cookie },
+  }));
+  expect(loginResponse.status).toBe(302);
+  expect(discoverySpy).toHaveBeenCalledTimes(1);
+
+  const [, , clientSecret, clientAuth] = discoverySpy.mock.calls[0] || [];
+  expect(clientSecret).toBeUndefined();
+  expect(typeof clientAuth).toBe('function');
+
+  const body = new URLSearchParams();
+  await (clientAuth as oidcClient.ClientAuth)(new URL('https://idp.example.com'), { client_id: 'crowdsec-client' }, body, new Headers());
+  expect(body.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+  expect(body.get('client_assertion')).toBe('test-federated-jwt');
+
+  discoverySpy.mockRestore();
 });
 
 describe('OIDC role mapping', () => {

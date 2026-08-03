@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { createRuntimeConfig as createRuntimeConfigImpl, getIntervalName, parseBooleanEnv, parseCsvEnv, parseLookbackToMs, parseOidcScope, parseOidcUnmatchedRole, parseOptionalBooleanEnv, parseRefreshInterval, parseTimeFormat, parseTimeZone } from '../../config';
+import { createRuntimeConfig as createRuntimeConfigImpl, getIntervalName, parseBooleanEnv, parseCsvEnv, parseLookbackToMs, parseOidcClientAuthMethod, parseOidcScope, parseOidcUnmatchedRole, parseOptionalBooleanEnv, parseRefreshInterval, parseTimeFormat, parseTimeZone } from '../../config';
 import { ConfigurationLoadError } from '../../config-error';
 import { createMissingConfigPath, createRuntimeConfig, createTempConfig, createTempSecret, tempDirs } from './harness';
 
@@ -55,6 +55,13 @@ describe('config helpers', () => {
     expect(parseOidcScope(undefined)).toBe('openid profile email');
     expect(parseOidcScope(' openid   profile email roles ')).toBe('openid profile email roles');
     expect(() => parseOidcScope('profile email groups')).toThrow(/AUTH_OIDC_SCOPE/);
+  });
+
+  test('parseOidcClientAuthMethod defaults and validates supported values', () => {
+    expect(parseOidcClientAuthMethod(undefined)).toBe('client_secret');
+    expect(parseOidcClientAuthMethod(' CLIENT_SECRET ')).toBe('client_secret');
+    expect(parseOidcClientAuthMethod('workload_identity')).toBe('workload_identity');
+    expect(() => parseOidcClientAuthMethod('private_key_jwt')).toThrow(/AUTH_OIDC_CLIENT_AUTH_METHOD/);
   });
 
   test('parseCsvEnv splits, trims, and drops empty entries', () => {
@@ -168,6 +175,8 @@ describe('config helpers', () => {
       AUTH_OIDC_ISSUER_URL: 'https://idp.example.com/application/o/crowdsec/',
       AUTH_OIDC_CLIENT_ID: 'crowdsec-client',
       AUTH_OIDC_CLIENT_SECRET: 'oidc-secret',
+      AUTH_OIDC_CLIENT_AUTH_METHOD: 'workload_identity',
+      AUTH_OIDC_FEDERATED_TOKEN_FILE: '/var/run/secrets/tokens/oidc-federated-token',
       AUTH_OIDC_SCOPE: 'openid profile email roles',
       AUTH_OIDC_GROUPS_CLAIM: 'roles',
       AUTH_OIDC_ADMIN_GROUPS: 'admins, secops',
@@ -225,6 +234,8 @@ describe('config helpers', () => {
       oidcIssuerUrl: 'https://idp.example.com/application/o/crowdsec/',
       oidcClientId: 'crowdsec-client',
       oidcClientSecret: 'oidc-secret',
+      oidcClientAuthMethod: 'workload_identity',
+      oidcFederatedTokenFile: '/var/run/secrets/tokens/oidc-federated-token',
       oidcScope: 'openid profile email roles',
       oidcGroupsClaim: 'roles',
       oidcAdminGroups: ['admins', 'secops'],
@@ -269,6 +280,8 @@ describe('config helpers', () => {
     expect(config.sqliteWalEnabled).toBe(true);
     expect(config.readOnly).toBe(false);
     expect(config.dashboardAuth.enabled).toBeNull();
+    expect(config.dashboardAuth.oidcClientAuthMethod).toBe('client_secret');
+    expect(config.dashboardAuth.oidcFederatedTokenFile).toBeUndefined();
     expect(config.dashboardAuth.oidcScope).toBe('openid profile email');
     expect(config.dashboardAuth.oidcGroupsClaim).toBe('groups');
     expect(config.dashboardAuth.oidcUnmatchedRole).toBe('deny');

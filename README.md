@@ -232,7 +232,9 @@ Use `CONFIG_FILE` only to select another existing file. [`config.example.yaml`](
 | `auth.totpSeed` | Unset | Optional base32 fallback TOTP seed for the password user; minimum 26 characters. | `CONFIG_AUTH_TOTP_SEED` or `CONFIG_AUTH_TOTP_SEED_FILE` |
 | `auth.oidc.issuerUrl` | Unset | OIDC provider issuer URL. | `CONFIG_AUTH_OIDC_ISSUER_URL` |
 | `auth.oidc.clientId` | Unset | OIDC client identifier. | `CONFIG_AUTH_OIDC_CLIENT_ID` |
-| `auth.oidc.clientSecret` | Unset | OIDC client secret. | `CONFIG_AUTH_OIDC_CLIENT_SECRET` or `CONFIG_AUTH_OIDC_CLIENT_SECRET_FILE` |
+| `auth.oidc.clientSecret` | Unset | OIDC client secret. Ignored when `clientAuthMethod` is `workload_identity`. | `CONFIG_AUTH_OIDC_CLIENT_SECRET` or `CONFIG_AUTH_OIDC_CLIENT_SECRET_FILE` |
+| `auth.oidc.clientAuthMethod` | `client_secret` | How the client authenticates to the token endpoint: `client_secret`, or `workload_identity` for secretless Workload Identity Federation (e.g. Azure/Entra ID federated credentials). | `CONFIG_AUTH_OIDC_CLIENT_AUTH_METHOD` |
+| `auth.oidc.federatedTokenFile` | Unset | File path read fresh on every token request and sent as the `client_assertion` (jwt-bearer). Required when `clientAuthMethod` is `workload_identity` — e.g. the AKS workload-identity projected token path. Must match a federated credential configured on the IdP app registration. | `CONFIG_AUTH_OIDC_FEDERATED_TOKEN_FILE` |
 | `auth.oidc.scope` | `openid profile email` | Requested OIDC scopes; must include `openid`. | `CONFIG_AUTH_OIDC_SCOPE` |
 | `auth.oidc.groupsClaim` | `groups` | Claim containing role-mapping groups. | `CONFIG_AUTH_OIDC_GROUPS_CLAIM` |
 | `auth.oidc.adminGroups` | `[]` | Groups granted administrator access. | `CONFIG_AUTH_OIDC_ADMIN_GROUPS` or `CONFIG_AUTH_OIDC_ADMIN_GROUPS_<INDEX>` |
