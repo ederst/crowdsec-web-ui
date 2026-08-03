@@ -371,6 +371,18 @@ describe('Settings authentication methods', () => {
     await screen.findByText('Application Admin');
     expect(screen.getByLabelText('Unmatched OIDC users')).toHaveValue('deny');
     expect(screen.getByLabelText('Unmatched OIDC users')).toHaveAccessibleDescription('Choose what happens when an OIDC user matches no configured group. The default is deny sign-in.');
+    expect(screen.getByLabelText('Client Authentication Method')).toHaveValue('client_secret');
+    expect(screen.getByLabelText('Client Secret')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Federated Token File Path')).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Client Authentication Method'), 'workload_identity');
+    expect(screen.queryByLabelText('Client Secret')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Federated Token File Path')).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText('Client Authentication Method'), 'client_secret');
+    expect(screen.getByLabelText('Client Secret')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Federated Token File Path')).not.toBeInTheDocument();
+
     expect(screen.queryByRole('button', { name: 'Remove openid' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Remove email' }));
     await user.type(screen.getByLabelText('Scopes'), 'groups');
@@ -391,6 +403,8 @@ describe('Settings authentication methods', () => {
           oidcIssuerUrl: 'https://idp.example.com',
           oidcClientId: 'crowdsec',
           oidcClientSecret: '',
+          oidcClientAuthMethod: 'client_secret',
+          oidcFederatedTokenFile: '',
           oidcScope: 'openid profile groups offline_access',
           oidcGroupsClaim: 'groups',
           oidcAdminGroups: 'Application Admin,security-team',

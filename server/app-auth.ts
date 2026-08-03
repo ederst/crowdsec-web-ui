@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
@@ -12,7 +13,14 @@ import {
 } from '@simplewebauthn/server';
 import { generateSecret, generateURI, verify } from 'otplib';
 import * as oidcClient from 'openid-client';
-import { parseOidcScope, parseOidcUnmatchedRole, type DashboardAuthConfig, type OidcUnmatchedRole } from './config';
+import {
+  parseOidcClientAuthMethod,
+  parseOidcScope,
+  parseOidcUnmatchedRole,
+  type DashboardAuthConfig,
+  type OidcClientAuthMethod,
+  type OidcUnmatchedRole,
+} from './config';
 import { CrowdsecDatabase, type AuthUserRow, type OidcUserUpsertParams } from './database';
 import type { DatabaseWrite } from './sync-worker-client';
 
@@ -25,6 +33,8 @@ type MutableAuthSettingKey =
   | 'oidc_issuer_url'
   | 'oidc_client_id'
   | 'oidc_client_secret'
+  | 'oidc_client_auth_method'
+  | 'oidc_federated_token_file'
   | 'oidc_scope'
   | 'oidc_groups_claim'
   | 'oidc_admin_groups'
@@ -35,6 +45,8 @@ interface EffectiveAuthConfig {
   oidcIssuerUrl?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
+  oidcClientAuthMethod: OidcClientAuthMethod;
+  oidcFederatedTokenFile?: string;
   oidcScope: string;
   oidcGroupsClaim: string;
   oidcAdminGroups: string[];
@@ -504,12 +516,16 @@ class OidcRuntime {
     if (!this.enabled) {
       throw new Error('OIDC is not configured');
     }
-    const nextCacheKey = `${config.oidcIssuerUrl || ''}\n${config.oidcClientId || ''}\n${config.oidcClientSecret || ''}`;
+    const nextCacheKey = `${config.oidcIssuerUrl || ''}\n${config.oidcClientId || ''}\n${config.oidcClientSecret || ''}\n${config.oidcClientAuthMethod}\n${config.oidcFederatedTokenFile || ''}`;
     if (!this.configuration || this.cacheKey !== nextCacheKey) {
+      const clientAuthentication = config.oidcClientAuthMethod === 'workload_identity' && config.oidcFederatedTokenFile
+        ? federatedTokenClientAuth(config.oidcFederatedTokenFile)
+        : undefined;
       this.configuration = await oidcClient.discovery(
         new URL(config.oidcIssuerUrl!),
         config.oidcClientId!,
-        config.oidcClientSecret || undefined,
+        clientAuthentication ? undefined : (config.oidcClientSecret || undefined),
+        clientAuthentication,
       );
       this.cacheKey = nextCacheKey;
     }
@@ -582,6 +598,22 @@ class OidcRuntime {
   }
 }
 
+function federatedTokenClientAuth(tokenFilePath: string): oidcClient.ClientAuth {
+  return async (_as, _client, body) => {
+    let assertion: string;
+    try {
+      assertion = (await fs.promises.readFile(tokenFilePath, 'utf8')).trim();
+    } catch (error) {
+      throw new Error(`Failed to read OIDC federated token file at "${tokenFilePath}": ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!assertion) {
+      throw new Error(`OIDC federated token file at "${tokenFilePath}" is empty`);
+    }
+    body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+    body.set('client_assertion', assertion);
+  };
+}
+
 export function createDashboardAuth(options: {
   config: DashboardAuthConfig;
   database: CrowdsecDatabase;
@@ -613,6 +645,8 @@ export function createDashboardAuth(options: {
       oidcIssuerUrl: readAuthSetting(database, 'oidc_issuer_url') ?? config.oidcIssuerUrl,
       oidcClientId: readAuthSetting(database, 'oidc_client_id') ?? config.oidcClientId,
       oidcClientSecret,
+      oidcClientAuthMethod: parseOidcClientAuthMethod(readAuthSetting(database, 'oidc_client_auth_method') ?? config.oidcClientAuthMethod),
+      oidcFederatedTokenFile: readAuthSetting(database, 'oidc_federated_token_file') ?? config.oidcFederatedTokenFile,
       oidcScope: readAuthSetting(database, 'oidc_scope')?.trim() || config.oidcScope,
       oidcGroupsClaim: readAuthSetting(database, 'oidc_groups_claim') || config.oidcGroupsClaim || 'groups',
       oidcAdminGroups: parseCsvList(readAuthSetting(database, 'oidc_admin_groups') ?? config.oidcAdminGroups.join(',')),
@@ -904,6 +938,8 @@ export function createDashboardAuth(options: {
         oidcIssuerUrl: effectiveConfig.oidcIssuerUrl || '',
         oidcClientId: effectiveConfig.oidcClientId || '',
         hasOidcClientSecret: Boolean(effectiveConfig.oidcClientSecret),
+        oidcClientAuthMethod: effectiveConfig.oidcClientAuthMethod,
+        oidcFederatedTokenFile: effectiveConfig.oidcFederatedTokenFile || '',
         oidcScope: effectiveConfig.oidcScope,
         oidcGroupsClaim: effectiveConfig.oidcGroupsClaim,
         oidcAdminGroups: effectiveConfig.oidcAdminGroups.join(','),
@@ -979,6 +1015,26 @@ export function createDashboardAuth(options: {
         await persistAuthSetting('oidc_unmatched_role', unmatchedRole);
       }
 
+      if ('oidcClientAuthMethod' in body) {
+        if (typeof body.oidcClientAuthMethod !== 'string') {
+          return context.json({ error: 'Invalid OIDC client authentication method' }, 400);
+        }
+        let clientAuthMethod: OidcClientAuthMethod;
+        try {
+          clientAuthMethod = parseOidcClientAuthMethod(body.oidcClientAuthMethod);
+        } catch {
+          return context.json({ error: 'Invalid OIDC client authentication method' }, 400);
+        }
+        await persistAuthSetting('oidc_client_auth_method', clientAuthMethod);
+      }
+
+      if ('oidcFederatedTokenFile' in body) {
+        if (typeof body.oidcFederatedTokenFile !== 'string') {
+          return context.json({ error: 'Invalid OIDC federated token file' }, 400);
+        }
+        await persistAuthSetting('oidc_federated_token_file', body.oidcFederatedTokenFile.trim());
+      }
+
       if ('oidcIssuerUrl' in body || 'oidcClientId' in body || 'oidcClientSecret' in body) {
         const currentConfig = getEffectiveConfig();
         const issuer = typeof body.oidcIssuerUrl === 'string' ? body.oidcIssuerUrl.trim() : (currentConfig.oidcIssuerUrl || '');
@@ -1011,6 +1067,8 @@ export function createDashboardAuth(options: {
           oidcIssuerUrl: effectiveConfig.oidcIssuerUrl || '',
           oidcClientId: effectiveConfig.oidcClientId || '',
           hasOidcClientSecret: Boolean(effectiveConfig.oidcClientSecret),
+          oidcClientAuthMethod: effectiveConfig.oidcClientAuthMethod,
+          oidcFederatedTokenFile: effectiveConfig.oidcFederatedTokenFile || '',
           oidcScope: effectiveConfig.oidcScope,
           oidcGroupsClaim: effectiveConfig.oidcGroupsClaim,
           oidcAdminGroups: effectiveConfig.oidcAdminGroups.join(','),

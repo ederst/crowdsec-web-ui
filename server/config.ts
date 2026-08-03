@@ -21,6 +21,7 @@ import { hasLegacyConnectionEnvironment, loadInstancesConfig, type CrowdsecInsta
 export type AlertFilterMode = 'default' | 'new' | 'legacy';
 export type TimeFormat = 'browser' | '12h' | '24h';
 export type OidcUnmatchedRole = 'deny' | 'admin' | 'read-only';
+export type OidcClientAuthMethod = 'client_secret' | 'workload_identity';
 export const DEFAULT_OIDC_SCOPE = 'openid profile email';
 
 export interface DashboardAuthConfig {
@@ -31,6 +32,8 @@ export interface DashboardAuthConfig {
   oidcIssuerUrl?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
+  oidcClientAuthMethod: OidcClientAuthMethod;
+  oidcFederatedTokenFile?: string;
   oidcScope: string;
   oidcGroupsClaim: string;
   oidcAdminGroups: string[];
@@ -183,6 +186,13 @@ export function parseOidcUnmatchedRole(value: string | undefined): OidcUnmatched
   throw new Error('Invalid AUTH_OIDC_UNMATCHED_ROLE value. Must be one of: deny, admin, read-only.');
 }
 
+export function parseOidcClientAuthMethod(value: string | undefined): OidcClientAuthMethod {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return 'client_secret';
+  if (normalized === 'client_secret' || normalized === 'workload_identity') return normalized;
+  throw new Error('Invalid AUTH_OIDC_CLIENT_AUTH_METHOD value. Must be one of: client_secret, workload_identity.');
+}
+
 export function parseOidcScope(value: string | undefined): string {
   const scope = value?.trim();
   if (!scope) return DEFAULT_OIDC_SCOPE;
@@ -237,6 +247,8 @@ function parseDashboardAuthConfig(env: NodeJS.ProcessEnv): DashboardAuthConfig {
     oidcIssuerUrl: resolveRenamedEnv(env, 'AUTH_OIDC_ISSUER_URL', 'CROWDSEC_AUTH_OIDC_ISSUER_URL')?.trim() || undefined,
     oidcClientId: resolveRenamedEnv(env, 'AUTH_OIDC_CLIENT_ID', 'CROWDSEC_AUTH_OIDC_CLIENT_ID')?.trim() || undefined,
     oidcClientSecret: resolveRenamedSecretEnv(env, 'AUTH_OIDC_CLIENT_SECRET', 'CROWDSEC_AUTH_OIDC_CLIENT_SECRET')?.trim() || undefined,
+    oidcClientAuthMethod: parseOidcClientAuthMethod(resolveRenamedEnv(env, 'AUTH_OIDC_CLIENT_AUTH_METHOD', 'CROWDSEC_AUTH_OIDC_CLIENT_AUTH_METHOD')),
+    oidcFederatedTokenFile: resolveRenamedEnv(env, 'AUTH_OIDC_FEDERATED_TOKEN_FILE', 'CROWDSEC_AUTH_OIDC_FEDERATED_TOKEN_FILE')?.trim() || undefined,
     oidcScope: parseOidcScope(resolveRenamedEnv(env, 'AUTH_OIDC_SCOPE', 'CROWDSEC_AUTH_OIDC_SCOPE')),
     oidcGroupsClaim: resolveRenamedEnv(env, 'AUTH_OIDC_GROUPS_CLAIM', 'CROWDSEC_AUTH_OIDC_GROUPS_CLAIM')?.trim() || 'groups',
     oidcAdminGroups: parseCsvEnv(resolveRenamedEnv(env, 'AUTH_OIDC_ADMIN_GROUPS', 'CROWDSEC_AUTH_OIDC_ADMIN_GROUPS')),

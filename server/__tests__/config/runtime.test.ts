@@ -57,6 +57,8 @@ describe('runtime configuration', () => {
       CROWDSEC_AUTH_OIDC_ISSUER_URL: 'https://legacy-idp.example.com/',
       CROWDSEC_AUTH_OIDC_CLIENT_ID: 'legacy-client',
       CROWDSEC_AUTH_OIDC_CLIENT_SECRET: 'legacy-oidc-secret',
+      CROWDSEC_AUTH_OIDC_CLIENT_AUTH_METHOD: 'workload_identity',
+      CROWDSEC_AUTH_OIDC_FEDERATED_TOKEN_FILE: '/var/run/secrets/legacy-oidc-token',
       CROWDSEC_AUTH_OIDC_SCOPE: 'openid profile legacy',
       CROWDSEC_AUTH_OIDC_GROUPS_CLAIM: 'legacy-groups',
       CROWDSEC_AUTH_OIDC_ADMIN_GROUPS: 'legacy-admins',
@@ -72,6 +74,8 @@ describe('runtime configuration', () => {
       oidcIssuerUrl: 'https://legacy-idp.example.com/',
       oidcClientId: 'legacy-client',
       oidcClientSecret: 'legacy-oidc-secret',
+      oidcClientAuthMethod: 'workload_identity',
+      oidcFederatedTokenFile: '/var/run/secrets/legacy-oidc-token',
       oidcScope: 'openid profile legacy',
       oidcGroupsClaim: 'legacy-groups',
       oidcAdminGroups: ['legacy-admins'],
@@ -92,6 +96,10 @@ describe('runtime configuration', () => {
       CROWDSEC_AUTH_TOTP_SEED: 'NB2W45DFOIZA====',
       AUTH_OIDC_CLIENT_ID: 'client',
       CROWDSEC_AUTH_OIDC_CLIENT_ID: 'legacy-client',
+      AUTH_OIDC_CLIENT_AUTH_METHOD: 'client_secret',
+      CROWDSEC_AUTH_OIDC_CLIENT_AUTH_METHOD: 'workload_identity',
+      AUTH_OIDC_FEDERATED_TOKEN_FILE: '/var/run/secrets/new-token',
+      CROWDSEC_AUTH_OIDC_FEDERATED_TOKEN_FILE: '/var/run/secrets/old-token',
     });
 
     expect(config.timeFormat).toBe('24h');
@@ -99,6 +107,14 @@ describe('runtime configuration', () => {
     expect(config.dashboardAuth.totpSecret).toBe('totp-secret');
     expect(config.dashboardAuth.totpSeed).toBe('JBSWY3DPEHPK3PXPJBSWY3DPEHPK3PXP');
     expect(config.dashboardAuth.oidcClientId).toBe('client');
+    expect(config.dashboardAuth.oidcClientAuthMethod).toBe('client_secret');
+    expect(config.dashboardAuth.oidcFederatedTokenFile).toBe('/var/run/secrets/new-token');
+  });
+
+  test('createRuntimeConfig rejects invalid OIDC client authentication method', () => {
+    expect(() => createRuntimeConfig({
+      AUTH_OIDC_CLIENT_AUTH_METHOD: 'private_key_jwt',
+    })).toThrow(/AUTH_OIDC_CLIENT_AUTH_METHOD/);
   });
 
   test('createRuntimeConfig rejects invalid TOTP seeds', () => {

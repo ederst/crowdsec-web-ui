@@ -54,6 +54,8 @@ interface AuthSettings {
     oidcAdminGroups: string;
     oidcReadOnlyGroups: string;
     oidcUnmatchedRole: OidcUnmatchedRole;
+    oidcClientAuthMethod: 'client_secret' | 'workload_identity';
+    oidcFederatedTokenFile: string;
     hasPassword: boolean;
     passkeysAvailable?: boolean;
     totpEnabled: boolean;
@@ -116,6 +118,8 @@ export function Settings() {
         issuerUrl: '',
         clientId: '',
         clientSecret: '',
+        clientAuthMethod: 'client_secret' as 'client_secret' | 'workload_identity',
+        federatedTokenFile: '',
         scopes: parseSpaceSeparatedList(DEFAULT_OIDC_SCOPE),
         groupsClaim: 'groups',
         adminGroups: [] as string[],
@@ -177,6 +181,8 @@ export function Settings() {
                             issuerUrl: payload.oidcIssuerUrl,
                             clientId: payload.oidcClientId,
                             clientSecret: '',
+                            clientAuthMethod: payload.oidcClientAuthMethod || 'client_secret',
+                            federatedTokenFile: payload.oidcFederatedTokenFile || '',
                             scopes: parseSpaceSeparatedList(payload.oidcScope || DEFAULT_OIDC_SCOPE),
                             groupsClaim: payload.oidcGroupsClaim || 'groups',
                             adminGroups: parseCsvList(payload.oidcAdminGroups || ''),
@@ -481,6 +487,8 @@ export function Settings() {
                     oidcIssuerUrl: oidcForm.issuerUrl,
                     oidcClientId: oidcForm.clientId,
                     oidcClientSecret: oidcForm.clientSecret,
+                    oidcClientAuthMethod: oidcForm.clientAuthMethod,
+                    oidcFederatedTokenFile: oidcForm.federatedTokenFile,
                     oidcScope: scopes,
                     oidcGroupsClaim: oidcForm.groupsClaim,
                     oidcAdminGroups: adminGroups,
@@ -503,6 +511,8 @@ export function Settings() {
                 oidcIssuerUrl: oidcForm.issuerUrl.trim(),
                 oidcClientId: oidcForm.clientId.trim(),
                 hasOidcClientSecret: Boolean(oidcForm.clientSecret.trim()) || current.hasOidcClientSecret,
+                oidcClientAuthMethod: oidcForm.clientAuthMethod,
+                oidcFederatedTokenFile: oidcForm.federatedTokenFile.trim(),
                 oidcScope: payload.settings?.oidcScope ?? (scopes || DEFAULT_OIDC_SCOPE),
                 oidcGroupsClaim: oidcForm.groupsClaim.trim() || 'groups',
                 oidcAdminGroups: adminGroups,
@@ -875,17 +885,44 @@ export function Settings() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <label htmlFor="oidc-client-secret" className={labelClass}>{t("pages.settings.oidcClientSecret")}</label>
-                                    <input
-                                        id="oidc-client-secret"
-                                        type="password"
-                                        value={oidcForm.clientSecret}
-                                        onChange={(event) => setOidcForm((current) => ({ ...current, clientSecret: event.target.value }))}
-                                        placeholder={authSettings?.hasOidcClientSecret ? t("pages.settings.unchanged") : ''}
+                                    <label htmlFor="oidc-client-auth-method" className={labelClass}>{t("pages.settings.oidcClientAuthMethod")}</label>
+                                    <select
+                                        id="oidc-client-auth-method"
+                                        value={oidcForm.clientAuthMethod}
+                                        onChange={(event) => setOidcForm((current) => ({ ...current, clientAuthMethod: event.target.value as 'client_secret' | 'workload_identity' }))}
                                         disabled={!canManageAuthSettings}
                                         className={inputClass}
-                                    />
+                                    >
+                                        <option value="client_secret">{t("pages.settings.oidcClientAuthMethodClientSecret")}</option>
+                                        <option value="workload_identity">{t("pages.settings.oidcClientAuthMethodWorkloadIdentity")}</option>
+                                    </select>
                                 </div>
+                                {oidcForm.clientAuthMethod === 'client_secret' ? (
+                                    <div className="space-y-2">
+                                        <label htmlFor="oidc-client-secret" className={labelClass}>{t("pages.settings.oidcClientSecret")}</label>
+                                        <input
+                                            id="oidc-client-secret"
+                                            type="password"
+                                            value={oidcForm.clientSecret}
+                                            onChange={(event) => setOidcForm((current) => ({ ...current, clientSecret: event.target.value }))}
+                                            placeholder={authSettings?.hasOidcClientSecret ? t("pages.settings.unchanged") : ''}
+                                            disabled={!canManageAuthSettings}
+                                            className={inputClass}
+                                        />
+                                    </div>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <label htmlFor="oidc-federated-token-file" className={labelClass}>{t("pages.settings.oidcFederatedTokenFile")}</label>
+                                        <input
+                                            id="oidc-federated-token-file"
+                                            value={oidcForm.federatedTokenFile}
+                                            onChange={(event) => setOidcForm((current) => ({ ...current, federatedTokenFile: event.target.value }))}
+                                            placeholder="/var/run/secrets/azure/tokens/azure-identity-token"
+                                            disabled={!canManageAuthSettings}
+                                            className={inputClass}
+                                        />
+                                    </div>
+                                )}
                                 <div className="lg:col-span-2">
                                     <GroupListEditor
                                         id="oidc-scopes"
